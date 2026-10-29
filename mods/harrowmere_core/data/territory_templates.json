@@ -1,0 +1,17 @@
+{
+  "types": {
+    "VILLAGE":  { "population": [30, 60],   "lawSet": "default",        "safe": false },
+    "CITY":     { "population": [150, 300], "lawSet": "tolerant_city",  "safe": false, "arena": true },
+    "KINGDOM":  { "population": [0, 0],      "lawSet": "default",        "safe": false },
+    "EMPIRE":   { "population": [0, 0],      "lawSet": "default",        "safe": false }
+  },
+  "villages_per_city": 4,
+  "cities_per_kingdom": 3,
+  "kingdoms_per_empire": 4,
+  "regionFlags": {
+    "raided":    1,
+    "blessed":   2,
+    "blighted":  4,
+    "war_torn":  8
+  }
+}

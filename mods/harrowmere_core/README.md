@@ -19,7 +19,8 @@ mod.
 | `data/` | all game content as JSON (species, items, laws, events...); filled from task 1.1 on, loaded by the task 0.4 loader |
 | `src/harrowmere_plugin.cpp` | the plugin seam: the entry table the kernel resolves (`engine_query_mod_entry_table`), the compiled manifest, the component lifecycle |
 | `src/bridge/harrowmere_capability.hpp` | the published capability surface (`SimCapability`) - the ONLY header consumers compile against |
-| `tests/` | `harrowmere_core_tests` (doctest) - wired by task 0.6 |
+| `src/core/` | the mod's internal core headers: pinned types, enums, and the sim event channels (task 0.7); consumers never compile against them - see `src/core/README.md` |
+| `tests/` | `harrowmere_core_tests` (doctest) - harness nucleus landed with task 0.7 (its pinned tests), full harness owned by task 0.6 |
 | `docs/DEVIATIONS.md` | the deviation log (common.md §1.4) |
 
 ## The `harrowmere.core` surface

@@ -1,0 +1,132 @@
+[
+  {
+    "id": 1,
+    "key": "iron_sword",
+    "name": "Iron Sword",
+    "rarity": 2000,
+    "level": 5,
+    "baseValue": 120,
+    "equippable": true,
+    "slot": "main_hand",
+    "guardMarked": false,
+    "stackable": false,
+    "weaponFactor": 1.5
+  },
+  {
+    "id": 2,
+    "key": "guard_halberd",
+    "name": "Guard Halberd",
+    "rarity": 5000,
+    "level": 12,
+    "baseValue": 400,
+    "equippable": true,
+    "slot": "main_hand",
+    "guardMarked": true,
+    "stackable": false,
+    "weaponFactor": 1.7
+  },
+  {
+    "id": 3,
+    "key": "bandage",
+    "name": "Bandage",
+    "rarity": 500,
+    "level": 1,
+    "baseValue": 8,
+    "equippable": false,
+    "guardMarked": false,
+    "stackable": true,
+    "consumable": {
+      "healHp": 40
+    }
+  },
+  {
+    "id": 4,
+    "key": "mana_tonic",
+    "name": "Mana Tonic",
+    "rarity": 7000,
+    "level": 10,
+    "baseValue": 250,
+    "equippable": false,
+    "guardMarked": false,
+    "stackable": true,
+    "consumable": {
+      "xpGain": 200,
+      "manaRich": true
+    }
+  },
+  {
+    "id": 5,
+    "key": "cloth_mask",
+    "name": "Cloth Mask",
+    "rarity": 500,
+    "level": 1,
+    "baseValue": 15,
+    "equippable": true,
+    "slot": "face",
+    "guardMarked": false,
+    "stackable": false,
+    "enablesAct": "MASKED"
+  },
+  {
+    "id": 6,
+    "key": "torch",
+    "name": "Torch",
+    "rarity": 100,
+    "level": 1,
+    "baseValue": 3,
+    "equippable": true,
+    "slot": "off_hand",
+    "guardMarked": false,
+    "stackable": true
+  },
+  {
+    "id": 7,
+    "key": "leather_armor",
+    "name": "Leather Armor",
+    "rarity": 1500,
+    "level": 4,
+    "baseValue": 80,
+    "equippable": true,
+    "slot": "body",
+    "guardMarked": false,
+    "stackable": false
+  },
+  {
+    "id": 8,
+    "key": "iron_ration",
+    "name": "Iron Ration",
+    "rarity": 200,
+    "level": 1,
+    "baseValue": 5,
+    "equippable": false,
+    "guardMarked": false,
+    "stackable": true,
+    "consumable": {
+      "healHp": 10
+    }
+  },
+  {
+    "id": 9,
+    "key": "captain_sword",
+    "name": "Captain's Sword",
+    "rarity": 8000,
+    "level": 25,
+    "baseValue": 1200,
+    "equippable": true,
+    "slot": "main_hand",
+    "guardMarked": true,
+    "stackable": false,
+    "weaponFactor": 2.0
+  },
+  {
+    "id": 10,
+    "key": "gold_coin",
+    "name": "Gold Coin",
+    "rarity": 100,
+    "level": 1,
+    "baseValue": 1,
+    "equippable": false,
+    "guardMarked": false,
+    "stackable": true
+  }
+]

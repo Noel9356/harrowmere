@@ -1,0 +1,155 @@
+[
+  {
+    "id": 0,
+    "key": "player",
+    "sapient": true,
+    "lifespan_years": 1000000,
+    "statMultiplier": {
+      "STRENGTH": 1.0,
+      "DEFENCE": 1.0,
+      "AGILITY": 1.0,
+      "INTELLIGENCE": 1.0,
+      "ENDURANCE": 1.0,
+      "PERCEPTION": 1.0
+    },
+    "appearance": "varies",
+    "darkvision": false,
+    "xenophobiaBias": 0.0,
+    "infectableVampire": false,
+    "damageTakenMultiplier": 1.0
+  },
+  {
+    "id": 1,
+    "key": "human",
+    "sapient": true,
+    "lifespan_years": 60,
+    "statMultiplier": {
+      "STRENGTH": 1.0,
+      "DEFENCE": 1.0,
+      "AGILITY": 1.0,
+      "INTELLIGENCE": 1.0,
+      "ENDURANCE": 1.0,
+      "PERCEPTION": 1.0
+    },
+    "appearance": "-",
+    "darkvision": false,
+    "xenophobiaBias": 0.0,
+    "infectableVampire": true,
+    "damageTakenMultiplier": 1.0
+  },
+  {
+    "id": 2,
+    "key": "beastkin",
+    "sapient": true,
+    "lifespan_years": 200,
+    "statMultiplier": {
+      "STRENGTH": 2.0,
+      "DEFENCE": 2.0,
+      "AGILITY": 2.0,
+      "INTELLIGENCE": 1.0,
+      "ENDURANCE": 1.0,
+      "PERCEPTION": 1.0
+    },
+    "appearance": "anthropomorphic animal",
+    "darkvision": true,
+    "xenophobiaBias": 0.0,
+    "infectableVampire": true,
+    "damageTakenMultiplier": 1.0
+  },
+  {
+    "id": 3,
+    "key": "taur",
+    "sapient": true,
+    "lifespan_years": 200,
+    "statMultiplier": {
+      "STRENGTH": 2.0,
+      "DEFENCE": 2.0,
+      "AGILITY": 2.0,
+      "INTELLIGENCE": 1.0,
+      "ENDURANCE": 1.0,
+      "PERCEPTION": 1.0
+    },
+    "appearance": "lower and upper halves can be any animal",
+    "darkvision": false,
+    "xenophobiaBias": 0.0,
+    "infectableVampire": true,
+    "damageTakenMultiplier": 1.0
+  },
+  {
+    "id": 4,
+    "key": "elf",
+    "sapient": true,
+    "lifespan_years": 1000,
+    "statMultiplier": {
+      "STRENGTH": 1.0,
+      "DEFENCE": 1.0,
+      "AGILITY": 1.0,
+      "INTELLIGENCE": 4.0,
+      "ENDURANCE": 1.0,
+      "PERCEPTION": 1.0
+    },
+    "appearance": "humans with long pointy ears",
+    "darkvision": true,
+    "xenophobiaBias": 2000,
+    "infectableVampire": true,
+    "damageTakenMultiplier": 1.0
+  },
+  {
+    "id": 5,
+    "key": "vampire",
+    "sapient": true,
+    "lifespan_years": 1000,
+    "statMultiplier": {
+      "STRENGTH": 4.0,
+      "DEFENCE": 4.0,
+      "AGILITY": 4.0,
+      "INTELLIGENCE": 4.0,
+      "ENDURANCE": 1.0,
+      "PERCEPTION": 1.0
+    },
+    "appearance": "varies",
+    "darkvision": true,
+    "xenophobiaBias": 0.0,
+    "infectableVampire": false,
+    "damageTakenMultiplier": 1.0,
+    "notes": "vampiric-disease origin is flavor in v1 (no infection system)"
+  },
+  {
+    "id": 6,
+    "key": "dragon",
+    "sapient": true,
+    "lifespan_years": 10000,
+    "statMultiplier": {
+      "STRENGTH": 5.0,
+      "DEFENCE": 5.0,
+      "AGILITY": 5.0,
+      "INTELLIGENCE": 5.0,
+      "ENDURANCE": 1.0,
+      "PERCEPTION": 1.0
+    },
+    "appearance": "eastern or western dragon",
+    "darkvision": true,
+    "xenophobiaBias": 0.0,
+    "infectableVampire": false,
+    "damageTakenMultiplier": 1.0
+  },
+  {
+    "id": 7,
+    "key": "goo_beast",
+    "sapient": false,
+    "lifespan_years": 1000000,
+    "statMultiplier": {
+      "STRENGTH": 6.0,
+      "DEFENCE": 6.0,
+      "AGILITY": 6.0,
+      "INTELLIGENCE": 6.0,
+      "ENDURANCE": 1.0,
+      "PERCEPTION": 1.0
+    },
+    "appearance": "anthropomorphic animal",
+    "darkvision": false,
+    "xenophobiaBias": 0.0,
+    "infectableVampire": false,
+    "damageTakenMultiplier": 0.25
+  }
+]

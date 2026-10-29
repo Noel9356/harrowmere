@@ -11,6 +11,12 @@ add_library(harrowmere_core SHARED
 # The mod's own translation units include the published header from src/bridge/.
 target_include_directories(harrowmere_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/bridge")
 
+# The mod's core headers (src/core/: the pinned types, enums and the sim event
+# channels) are internal to harrowmere_core - consumers never compile against
+# them (§4.2: the capability header is the only published surface); the unit
+# tests include them directly (see tests/CMakeLists.txt).
+target_include_directories(harrowmere_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/core")
+
 target_link_libraries(harrowmere_core
     PUBLIC engine_kernel
     # The required capabilities' published headers (include path only): the
@@ -75,3 +81,13 @@ add_custom_command(TARGET harrowmere_core POST_BUILD
             "${CMAKE_CURRENT_SOURCE_DIR}/data"
             "${CMAKE_BINARY_DIR}/runtime/mods/harrowmere_core/data"
     COMMENT "packaging harrowmere_core game data")
+
+# ---- Unit tests ---------------------------------------------------------------
+# The harness nucleus lands with task 0.7 (its card's two pinned tests);
+# task 0.6 owns the full harness (test-count gate, scripts/ci.sh). The switch
+# keeps a packager's default path identical when the test binary is unwanted;
+# the vendored doctest the tests compile against lives in third_party/doctest.
+option(HARROWMERE_CORE_BUILD_TESTS "Build the harrowmere_core unit tests" ON)
+if(HARROWMERE_CORE_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

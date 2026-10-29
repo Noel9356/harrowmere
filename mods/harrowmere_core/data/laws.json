@@ -1,0 +1,56 @@
+{
+  "sets": [
+    {
+      "key": "default",
+      "convictionThreshold": {
+        "MURDER": 7000, "ASSAULT": 6000, "THEFT": 5000, "ARSON": 6000,
+        "TRESPASS": 4000, "POACHING": 5000, "SMUGGLING": 5000, "OBSTRUCTION": 5000
+      },
+      "suppression": {},
+      "exemptions": {},
+      "cultureBias": {},
+      "suspicion": []
+    },
+    {
+      "key": "tolerant_city",
+      "convictionThreshold": {
+        "MURDER": 8000, "ASSAULT": 7000, "THEFT": 6000, "ARSON": 7000,
+        "TRESPASS": 4000, "POACHING": 5000, "SMUGGLING": 5000, "OBSTRUCTION": 5000
+      },
+      "suppression": {},
+      "exemptions": {},
+      "cultureBias": { "4": 1000 },
+      "suspicion": []
+    },
+    {
+      "key": "xenophobic_village",
+      "convictionThreshold": {
+        "MURDER": 6000, "ASSAULT": 6000, "THEFT": 5000, "ARSON": 6000,
+        "TRESPASS": 3000, "POACHING": 4000, "SMUGGLING": 5000, "OBSTRUCTION": 5000
+      },
+      "suppression": {
+        "NOBLE": { "ASSAULT": 6000 }
+      },
+      "exemptions": {
+        "2": { "MURDER": true },
+        "3": { "MURDER": true }
+      },
+      "cultureBias": { "2": -6000, "3": -6000, "4": -1000 },
+      "suspicion": [
+        { "act": "MASKED", "masks": ["SETTLEMENT"], "weight": 6000 }
+      ]
+    },
+    {
+      "key": "safe_zone_laws",
+      "convictionThreshold": {
+        "MURDER": 7000, "ASSAULT": 6000, "THEFT": 5000, "ARSON": 6000,
+        "TRESPASS": 4000, "POACHING": 5000, "SMUGGLING": 5000, "OBSTRUCTION": 5000
+      },
+      "suppression": {},
+      "exemptions": {},
+      "cultureBias": {},
+      "suspicion": [],
+      "safe": true
+    }
+  ]
+}
