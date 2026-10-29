@@ -1,0 +1,83 @@
+# The module's own build switch, declared here so everything about the module
+# lives in its directory: the root build discovers this CMakeLists and the
+# option arrives with it. OFF keeps every target defined - consumers still
+# compile against the published capability header below, and an in-tree
+# consumer that links the implementation still pulls it - but removes the
+# plugin binary from the default build; a run whose mods then demand a
+# capability only this module provides fails startup with a precise
+# diagnostic naming the consumer, never a link error.
+option(ENGINE_BUILD_MODULE_PBR "Include the pbr module in the build" ON)
+# The published capability surface of this module: a header-only INTERFACE
+# target. Consumers link it to include lighting_capability.hpp WITHOUT linking this module's
+# implementation - the capability graph stays explicit in the target links,
+# and no consumer binary depends on another module's symbols at load time.
+add_library(engine_capability_pbr INTERFACE)
+target_include_directories(engine_capability_pbr INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
+
+# The portability guard: the published header must stay implementation-,
+# platform- and vendor-agnostic (see cmake/capability_header_guard.cmake).
+engine_guard_capability_header("${CMAKE_CURRENT_SOURCE_DIR}/lighting_capability.hpp")
+
+add_library(engine_module_pbr SHARED
+    module_plugin.cpp
+    pbr.cpp
+)
+
+target_link_libraries(engine_module_pbr
+    PUBLIC engine_kernel
+    PUBLIC engine_capability_pbr
+    PUBLIC engine_capability_logging
+    PUBLIC engine_capability_renderer
+    # engine_capability_lua_scripting publishes the LuaBridgeExtension contract
+    # header from the lua_scripting module. The pbr module implements that
+    # contract to install engine.set_sun_light / clear_sun_light /
+    # add_point_light / remove_point_light into every script state through
+    # the host's acquireEachCapability - the host discovers this extension at
+    # runtime, so this is the only build-time coupling between the two
+    # modules (an INTERFACE target on a header, not a link against the
+    # lua_scripting binary).
+    PUBLIC engine_capability_lua_scripting
+    PRIVATE engine_module_renderer_vulkan
+    PRIVATE engine_vulkan_hpp_bindings
+    PRIVATE engine_sol2_bindings
+)
+
+if(ENGINE_BUILD_DEMO AND ENGINE_BUILD_MODULE_PBR)
+    include("${CMAKE_SOURCE_DIR}/cmake/shader_compilation.cmake")
+    engine_compile_module_shaders(TARGET engine_module_pbr
+                                  SOURCES shaders/pbr_lighting.comp
+                                  INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/modules/renderer_vulkan/shaders/common")
+endif()
+
+
+# Module plugin deployment: the binary lands in runtime/modules/, the directory
+# the kernel scans for plugins (see engine_kernel.cpp loadModulePlugins).
+# PREFIX keeps one naming scheme on every platform (libengine_module_pbr.dll
+# on Windows, libengine_module_pbr.so on POSIX); the $ORIGIN entries resolve
+# the sibling plugins and $ORIGIN/.. the kernel and GLFW runtimes in runtime/;
+# WINDOWS_EXPORT_ALL_SYMBOLS publishes the module's C++ surface to the other
+# plugins that consume it across the boundary.
+set_target_properties(engine_module_pbr PROPERTIES
+    PREFIX "lib"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/runtime/modules"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/runtime/modules"
+    BUILD_RPATH "${ENGINE_PLUGIN_RPATH_BUILD}"
+    INSTALL_RPATH "${ENGINE_PLUGIN_RPATH_INSTALL}"
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+# MinGW: one explicit __declspec(dllexport) (the plugin entry point) disables
+# the linker's all-symbol auto-export, and WINDOWS_EXPORT_ALL_SYMBOLS above is
+# implemented only for MS-compatible toolchains; this flag publishes the
+# module's C++ surface to the other plugins' import libraries (the lighting
+# techniques reach RendererModule::attachLightingTechnique directly).
+if(MINGW)
+    target_link_options(engine_module_pbr PRIVATE -Wl,--export-all-symbols)
+endif()
+
+# Excluded from the default build when the option is OFF: the target stays
+# defined for consumers, but nothing builds the plugin binary unless an
+# in-tree consumer actually links it (the runtime then simply does not see
+# the plugin, and a demand for its capability fails startup precisely).
+if(NOT ENGINE_BUILD_MODULE_PBR)
+    set_target_properties(engine_module_pbr PROPERTIES EXCLUDE_FROM_ALL ON)
+endif()

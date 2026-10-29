@@ -1,0 +1,310 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// Radiance cascades, final gather (the world_space_radiance_cascades
+// placement capability; see modules/radiance_cascades/README.md).
+//
+// Per pixel diffuse irradiance from the composed world-space cascades. The
+// screen-space path blends four bilinear probes per cascade at the pixel's
+// screen position; world-space blends EIGHT trilinear probes per cascade at
+// the pixel's surface world position. The leak guard (line-of-sight
+// weighted probe blend) carries over unchanged - the guard's geometry is
+// "is the segment from the pixel to the probe visible through the SDF",
+// independent of how the probe is anchored.
+//
+// Depth-selective cascade choice: same as screen-space. The smallest
+// cascade whose interval end reaches beyond the pixel's view depth wins;
+// the next finer one blends in over the first 40% of the slab (the seam
+// band). Starved pixels fall back CONTINUOUSLY to finer cascade, then to
+// the pixel's own direct irradiance over pi - the same fallback chain
+// screen-space uses, with the line-of-sight guard unchanged.
+//
+// The sky-pixel early-out is identical to screen-space: a depth of 1.0
+// means "no surface here", and the composite paints the sky there.
+
+
+#include "relight_common.glsl"
+#include "common/cascade_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 1, binding = 0) uniform sampler2DArray fullCascade0;
+layout(set = 1, binding = 1) uniform sampler2DArray fullCascade1;
+layout(set = 1, binding = 2) uniform sampler2DArray fullCascade2;
+layout(set = 1, binding = 3) uniform sampler2DArray fullCascade3;
+layout(set = 1, binding = 4) uniform sampler2DArray fullCascade4;
+layout(set = 1, binding = 5) uniform sampler2DArray fullCascade5;
+layout(set = 1, binding = 6) uniform sampler2DArray fullCascade6;
+layout(set = 1, binding = 7) uniform sampler2DArray fullCascade7;
+layout(set = 1, binding = 8) uniform sampler2D depthSampler;
+layout(set = 1, binding = 9) uniform sampler2D normalSampler;
+layout(set = 1, binding = 10, rgba16f) uniform restrict writeonly image2D giImage;
+
+layout(push_constant) uniform GatherPush
+{
+    layout(offset = 0) uvec4 counts;        // x primitiveCount, y losSteps, z visibilityEnabled, w cascadeCount
+    layout(offset = 16) vec4 schedule;      // x intervalBase, y intervalFactor, zw unused
+    layout(offset = 32) uvec4 dirs;          // x directionCount, y unused, z unused, w unused
+    layout(offset = 48) vec4 originCellSize0; // xyz grid origin cascade 0 (world), w cell size cascade 0
+    layout(offset = 64) vec4 dims0;         // x gridW cascade 0, y gridH cascade 0, z gridD cascade 0, w unused
+    layout(offset = 80) vec4 originCellSize1;
+    layout(offset = 96) vec4 dims1;
+    layout(offset = 112) vec4 pureTransport; // x pureTransport (1 = no direct fallback: intermediate bounces), yzw unused
+} push_;
+
+// The push_constant block above is 128 bytes (the Vulkan minimum
+// maxPushConstantSize). The cascade origin/cellSize/dims slot for cascades
+// 2..7 is reconstructed on the fly from cascade 0/1's values: cell size
+// doubles per cascade (cellSize_c = cellSize_0 * 2^c) and the grid origin
+// shifts by half the per-cascade cell stride (each coarser grid's origin
+// is offset by half its cell size so the cells centre on the finer grid's
+// corners - the standard radiance-cascades nesting rule).
+vec4 cascadeOriginCellSize(uint cascade)
+{
+    if (cascade == 0u) return push_.originCellSize0;
+    if (cascade == 1u) return push_.originCellSize1;
+    // Cascades 2..7 are reconstructed from cascade 0's data using the
+    // standard radiance-cascades nesting rule: each coarser cascade's
+    // cellSize doubles (cellSize_c = cellSize_0 * 2^c), and the grid
+    // origin shifts so coarser cells centre on finer cells' corners.
+    //
+    // The C++ pass computed origin_c = camera - halfExtent_c + coarseOffset_c
+    // where halfExtent_c = dims_c * cellSize_c * 0.5 and coarseOffset_c =
+    // cellSize_c * 0.5 (cascade > 0). Since origin_0 = camera - halfExtent_0
+    // (cascade 0 has no coarseOffset), camera = origin_0 + halfExtent_0, so:
+    //
+    //   origin_c = origin_0 + halfExtent_0 - halfExtent_c + coarseOffset_c
+    //           = origin_0 + 0.5 * cellSize_0 * dims_0
+    //                        - 0.5 * cellSize_0 * 2^c * dims_0
+    //                        + 0.5 * cellSize_0 * 2^c
+    //           = origin_0 + 0.5 * cellSize_0 * (dims_0 * (1 - 2^c) + 2^c)
+    //
+    // The grid dimensions stay constant per cascade (only cell size and
+    // origin offset change), so dims_c == dims_0.
+    const float scale = pow(2.0, float(cascade));
+    const vec3 dims = vec3(push_.dims0.xyz);
+    return vec4(push_.originCellSize0.xyz
+                  + 0.5 * push_.originCellSize0.w * (dims * (1.0 - scale) + vec3(scale)),
+                push_.originCellSize0.w * scale);
+}
+
+vec3 cascadeDims(uint cascade)
+{
+    if (cascade == 0u) return push_.dims0.xyz;
+    if (cascade == 1u) return push_.dims1.xyz;
+    return push_.dims0.xyz; // grid dimensions stay constant per cascade by design
+}
+
+// Trilinear probe blend for one cascade at the surface world position.
+// Returns the irradiance and the surviving trilinear weight sum through
+// `coverage` (0 = every probe blocked or out of grid).
+vec3 gatherWorldCascade(uint cascade, vec3 position, vec3 normal, out float coverage)
+{
+    const vec4 originCellSize = cascadeOriginCellSize(cascade);
+    const vec3 dims = cascadeDims(cascade);
+    const vec3 cellF = (position - originCellSize.xyz) / originCellSize.w;
+    const vec3 base = floor(cellF - vec3(0.5));
+    const vec3 fraction = clamp(cellF - vec3(0.5) - base, vec3(0.0), vec3(1.0));
+
+    const ivec3 gridLimit = ivec3(dims) - ivec3(1);
+    // Out-of-grid cells: the probe is treated as fully blocked (weight 0),
+    // so a pixel whose 8-neighbourhood spans the grid edge falls back to
+    // its other covered cascades - the same fallback chain screen-space
+    // uses for starved pixels.
+    const bool visibilityEnabled = push_.counts.z != 0u;
+
+    // The pixel's LOS start leaves its surface by a centimetre - the same
+    // inside-surface guard as screen-space, with the camera-direction
+    // fallback when the G-buffer normal maps the offset inside geometry.
+    vec3 losStart = position + normal * 0.01;
+    if (sceneSDF(losStart, push_.counts.x) < 0.0)
+    {
+        losStart = position + normalize(cameraPosition.xyz - position) * 0.01;
+    }
+
+    vec3 accumulated = vec3(0.0);
+    float weightSum = 0.0;
+    const uint directionCount = push_.dirs.x;
+
+    for (int dz = 0; dz < 2; ++dz)
+    {
+        for (int dy = 0; dy < 2; ++dy)
+        {
+            for (int dx = 0; dx < 2; ++dx)
+            {
+                const ivec3 cell = ivec3(base) + ivec3(dx, dy, dz);
+                if (any(lessThan(cell, ivec3(0))) || any(greaterThan(cell, gridLimit)))
+                {
+                    continue; // outside the grid: probe weight 0
+                }
+                const vec3 probeAnchor = originCellSize.xyz
+                                       + (vec3(cell) + vec3(0.5)) * originCellSize.w;
+
+                // Leak guard: drop probes the pixel cannot see. Same shape as
+                // screen-space - both endpoints inside-tested, midpoint
+                // fast-trust for same-surface probes, full LOS trace
+                // otherwise. The probe anchor here is the deterministic
+                // world-space cell center (no normal-mapped perturbation),
+                // so the probe-side inside test is unnecessary.
+                float visibility = 1.0;
+                if (visibilityEnabled)
+                {
+                    const vec3 toProbe = probeAnchor - position;
+                    if (dot(toProbe, toProbe) < 0.64 && dot(normal, vec3(0.0, 1.0, 0.0)) > 0.75)
+                    {
+                        // Same-surface trust: midpoint fast-path. (The
+                        // probe's anchor is deterministic; its normal is
+                        // the cell's geometric up axis - a stand-in.
+                        // Production builds would store a probe normal.)
+                        const vec3 midPoint = (losStart + probeAnchor) * 0.5;
+                        visibility = sceneSDF(midPoint, push_.counts.x) > -0.02
+                            ? 1.0
+                            : lineOfSight(losStart, probeAnchor, push_.counts.x, push_.counts.y);
+                    }
+                    else
+                    {
+                        visibility = lineOfSight(losStart, probeAnchor, push_.counts.x, push_.counts.y);
+                    }
+                }
+
+                const float tx = (dx == 0 ? 1.0 - fraction.x : fraction.x);
+                const float ty = (dy == 0 ? 1.0 - fraction.y : fraction.y);
+                const float tz = (dz == 0 ? 1.0 - fraction.z : fraction.z);
+                const float bilinear = tx * ty * tz;
+                const float weight = bilinear * visibility;
+                if (weight <= 0.0)
+                {
+                    continue;
+                }
+
+                // The probe's composed field lives in the 2D array image at
+                // texel (cell_x, cell_y + cell_z * gridH, layer=direction).
+                // texelFetch uses integer texel coordinates directly (no
+                // normalized UV conversion needed; matches the screen-space
+                // gather's access pattern). The (x, y) texel coords are
+                // loop-invariant; the layer is per-direction.
+                const ivec2 txPosXY = ivec2(int(cell.x), int(cell.y) + int(cell.z) * int(dims.y));
+
+                vec3 irradiance = vec3(0.0);
+                for (uint directionIndex = 0u; directionIndex < directionCount; ++directionIndex)
+                {
+                    const vec4 directionData = cascadeDirections[directionIndex];
+                    const float cosine = max(dot(normal, directionData.xyz), 0.0);
+                    if (cosine <= 0.0)
+                    {
+                        continue;
+                    }
+                    vec3 radiance;
+                    const ivec3 dirTxPos = ivec3(txPosXY, int(directionIndex));
+                    switch (cascade)
+                    {
+                    case 0u: radiance = texelFetch(fullCascade0, dirTxPos, 0).rgb; break;
+                    case 1u: radiance = texelFetch(fullCascade1, dirTxPos, 0).rgb; break;
+                    case 2u: radiance = texelFetch(fullCascade2, dirTxPos, 0).rgb; break;
+                    case 3u: radiance = texelFetch(fullCascade3, dirTxPos, 0).rgb; break;
+                    case 4u: radiance = texelFetch(fullCascade4, dirTxPos, 0).rgb; break;
+                    case 5u: radiance = texelFetch(fullCascade5, dirTxPos, 0).rgb; break;
+                    case 6u: radiance = texelFetch(fullCascade6, dirTxPos, 0).rgb; break;
+                    default: radiance = texelFetch(fullCascade7, dirTxPos, 0).rgb; break;
+                    }
+                    irradiance += cosine * directionData.w * radiance;
+                }
+                irradiance /= 3.14159265358979;
+
+                accumulated += weight * irradiance;
+                weightSum += weight;
+            }
+        }
+    }
+
+    coverage = weightSum;
+    return weightSum > 0.0 ? accumulated / weightSum : vec3(0.0);
+}
+
+void main()
+{
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    const ivec2 extent = imageSize(giImage);
+    if (pixel.x >= extent.x || pixel.y >= extent.y)
+    {
+        return;
+    }
+
+    const vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(extent);
+    // Direct integer fetches: the G-buffer shares the gather's frame extent,
+    // so the normalized uv this replaced named the pixel's own texel (same
+    // rationale as rc_gather.comp; the cascade trilinear reads inside
+    // gatherWorldCascade keep the sampler - probe lattice, not pixel grid).
+    const float depth = texelFetch(depthSampler, pixel, 0).r;
+    if (depth >= 1.0)
+    {
+        imageStore(giImage, pixel, vec4(0.0));
+        return;
+    }
+
+    const vec2 normalized = uv * 2.0 - vec2(1.0);
+    const vec3 position = worldPositionFromDepth(inverseViewProjection, normalized, depth);
+    const vec3 normal = normalize(texelFetch(normalSampler, pixel, 0).xyz);
+
+    // Depth-selective cascade choice: the smallest cascade whose interval
+    // end reaches beyond the pixel's view depth.
+    const float viewDepth = length(position - cameraPosition.xyz);
+    uint cascade = 0u;
+    float intervalEnd = push_.schedule.x;
+    for (uint candidate = 0u; candidate + 1u < push_.counts.w; ++candidate)
+    {
+        if (viewDepth < intervalEnd)
+        {
+            break;
+        }
+        intervalEnd *= push_.schedule.y;
+        ++cascade;
+    }
+
+    float coverage;
+    vec3 selected = gatherWorldCascade(cascade, position, normal, coverage);
+    vec3 gi = selected;
+    float finerCoverage = 0.0;
+    if (cascade > 0u)
+    {
+        const float tStart = push_.schedule.x * pow(push_.schedule.y, float(cascade - 1u));
+        const float slabLength = push_.schedule.x * pow(push_.schedule.y, float(cascade)) - tStart;
+        const float blend = smoothstep(0.0, 0.4, clamp((viewDepth - tStart) / max(slabLength, 1e-4), 0.0, 1.0));
+        vec3 finer = vec3(0.0);
+        if (blend < 1.0 || coverage < 0.3)
+        {
+            finer = gatherWorldCascade(cascade - 1u, position, normal, finerCoverage);
+        }
+
+        if (coverage >= 0.3)
+        {
+            gi = mix(finer, selected, blend);
+        }
+        else
+        {
+            vec3 fallback = finer;
+            float fallbackCoverage = finerCoverage;
+            if (fallbackCoverage < 0.3 && cascade > 1u)
+            {
+                float cascade0Coverage = 0.0;
+                const vec3 cascade0 = gatherWorldCascade(0u, position, normal, cascade0Coverage);
+                if (cascade0Coverage > fallbackCoverage)
+                {
+                    fallback = cascade0;
+                    fallbackCoverage = cascade0Coverage;
+                }
+            }
+            if (fallbackCoverage < 0.001 && push_.pureTransport.x < 0.5)
+            {
+                fallback = directIrradianceOverPi(position, normal, push_.counts.x);
+            }
+            const float trust = smoothstep(0.0, 0.3, coverage);
+            gi = mix(fallback, mix(finer, selected, blend), trust);
+        }
+    }
+
+    if (all(lessThan(gi, vec3(1e-5))) && push_.pureTransport.x < 0.5)
+    {
+        gi = directIrradianceOverPi(position, normal, push_.counts.x);
+    }
+    imageStore(giImage, pixel, vec4(gi, 1.0));
+}

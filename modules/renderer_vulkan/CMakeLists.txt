@@ -1,0 +1,113 @@
+# The module's own build switch, declared here so everything about the module
+# lives in its directory: the root build discovers this CMakeLists and the
+# option arrives with it. OFF keeps every target defined - consumers still
+# compile against the published capability header below, and an in-tree
+# consumer that links the implementation still pulls it - but removes the
+# plugin binary from the default build; a run whose mods then demand a
+# capability only this module provides fails startup with a precise
+# diagnostic naming the consumer, never a link error.
+option(ENGINE_BUILD_MODULE_RENDERER_VULKAN "Include the renderer_vulkan module in the build" ON)
+# The published capability surface of this module: a header-only INTERFACE
+# target. Consumers link it to include renderer_capability.hpp WITHOUT linking this module's
+# implementation - the capability graph stays explicit in the target links,
+# and no consumer binary depends on another module's symbols at load time.
+add_library(engine_capability_renderer INTERFACE)
+target_include_directories(engine_capability_renderer INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
+
+# The portability guard: the published header must stay implementation-,
+# platform- and vendor-agnostic (see cmake/capability_header_guard.cmake).
+engine_guard_capability_header("${CMAKE_CURRENT_SOURCE_DIR}/renderer_capability.hpp")
+engine_guard_capability_header("${CMAKE_CURRENT_SOURCE_DIR}/renderer_overlay_capability.hpp")
+
+# One state struct (renderer_state.hpp, module-private), several translation
+# units split by concern: device/swapchain creation, scene resources, pipelines,
+# frame recording, and the module lifecycle.
+add_library(engine_module_renderer_vulkan SHARED
+    module_plugin.cpp
+    renderer.cpp
+    renderer_device.cpp
+    renderer_scene.cpp
+    renderer_pipelines.cpp
+    renderer_frames.cpp
+    scene_description.cpp
+    mesh_generation.cpp
+)
+
+target_link_libraries(engine_module_renderer_vulkan
+    PUBLIC engine_kernel
+    PUBLIC engine_capability_renderer
+    PUBLIC engine_capability_logging
+    PUBLIC engine_capability_window
+    PUBLIC engine_capability_input
+    PUBLIC engine_capability_ui
+    PUBLIC engine_capability_pbr
+    PUBLIC engine_capability_scene
+    PUBLIC engine_capability_hot_reload
+    # engine_capability_lua_scripting publishes the LuaBridgeExtension contract
+    # header from the lua_scripting module. The renderer module implements that
+    # contract to install engine.camera_position / camera_look_at /
+    # set_camera_position / set_camera_look_at into every script state through
+    # the host's acquireEachCapability - the host discovers this extension at
+    # runtime, so this is the only build-time coupling between the two
+    # modules (an INTERFACE target on a header, not a link against the
+    # lua_scripting binary).
+    PUBLIC engine_capability_lua_scripting
+    PRIVATE engine_vulkan_hpp_bindings
+    PRIVATE engine_stb_bindings
+    PRIVATE engine_sol2_bindings
+    # scene_math.hpp includes <glm/glm.hpp>: the projection and transform
+    # math is module-internal, so glm arrives here and NOT through any
+    # published capability header (see engine_dependencies.cmake, "glm" -
+    # linking it PRIVATE keeps the ODR-critical GLM_FORCE_DEPTH_ZERO_TO_ONE
+    # configuration in the one wrapper target every glm TU shares).
+    PRIVATE engine_glm_bindings
+)
+
+# The renderer owns the scene rasterization and composite shaders. The shared
+# SDF/PBR include directory is consumed by the lighting modules through
+# INCLUDE_DIRS, so one geometry truth backs rasterization and tracing.
+if(ENGINE_BUILD_DEMO AND ENGINE_BUILD_MODULE_RENDERER_VULKAN)
+    include("${CMAKE_SOURCE_DIR}/cmake/shader_compilation.cmake")
+    engine_compile_module_shaders(TARGET engine_module_renderer_vulkan
+                                  SOURCES shaders/scene.vert
+                                          shaders/scene.frag
+                                          shaders/scene_composite.vert
+                                          shaders/scene_composite.frag
+                                          shaders/scene_bloom_extract.comp
+                                          shaders/scene_bloom_blur.comp
+                                          shaders/scene_composite_final.frag
+                                  INCLUDE_DIRS shaders/common)
+endif()
+
+
+# Module plugin deployment: the binary lands in runtime/modules/, the directory
+# the kernel scans for plugins (see engine_kernel.cpp loadModulePlugins).
+# PREFIX keeps one naming scheme on every platform (libengine_module_renderer_vulkan.dll
+# on Windows, libengine_module_renderer_vulkan.so on POSIX); the $ORIGIN entries resolve
+# the sibling plugins and $ORIGIN/.. the kernel and GLFW runtimes in runtime/;
+# WINDOWS_EXPORT_ALL_SYMBOLS publishes the module's C++ surface to the other
+# plugins that consume it across the boundary.
+set_target_properties(engine_module_renderer_vulkan PROPERTIES
+    PREFIX "lib"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/runtime/modules"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/runtime/modules"
+    BUILD_RPATH "${ENGINE_PLUGIN_RPATH_BUILD}"
+    INSTALL_RPATH "${ENGINE_PLUGIN_RPATH_INSTALL}"
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+# MinGW: one explicit __declspec(dllexport) (the plugin entry point) disables
+# the linker's all-symbol auto-export, and WINDOWS_EXPORT_ALL_SYMBOLS above is
+# implemented only for MS-compatible toolchains; this flag publishes the
+# module's C++ surface to the other plugins' import libraries (the lighting
+# techniques reach RendererModule::attachLightingTechnique directly).
+if(MINGW)
+    target_link_options(engine_module_renderer_vulkan PRIVATE -Wl,--export-all-symbols)
+endif()
+
+# Excluded from the default build when the option is OFF: the target stays
+# defined for consumers, but nothing builds the plugin binary unless an
+# in-tree consumer actually links it (the runtime then simply does not see
+# the plugin, and a demand for its capability fails startup precisely).
+if(NOT ENGINE_BUILD_MODULE_RENDERER_VULKAN)
+    set_target_properties(engine_module_renderer_vulkan PROPERTIES EXCLUDE_FROM_ALL ON)
+endif()

@@ -1,0 +1,41 @@
+// The module plugin seam of 'window_glfw': one exported entry point that hands the
+// kernel this binary's static descriptor (engine/kernel/module_api.hpp). The
+// descriptor carries the module's name, its factory and its static capability
+// declaration; the kernel reads all three without creating an instance, and
+// only instantiates the module when the demand closure requires one of its
+// capabilities.
+#include "engine/kernel/module_api.hpp"
+
+#include <iterator>
+
+#include "window.hpp"
+
+namespace
+{
+const char *const windowProvidedCapabilities[] = {"window.glfw"};
+const char *const windowRequiredCapabilities[] = {"logging"};
+
+engine::ModuleInterface *createwindowPluginModule()
+{
+    return new engine::WindowModule();
+}
+
+const engine::EngineModulePluginEntry windowPluginEntry{
+    .abiVersion              = engine::engineModulePluginAbiVersion,
+    .moduleName              = "window",
+    .createModule            = &createwindowPluginModule,
+    .providedCapabilities    = windowProvidedCapabilities,
+    .providedCapabilityCount = std::size(windowProvidedCapabilities),
+    .requiredCapabilities    = windowRequiredCapabilities,
+    .requiredCapabilityCount = std::size(windowRequiredCapabilities),
+    .optionalCapabilities    = nullptr,
+    .optionalCapabilityCount = 0,
+    .declaredPermissions     = nullptr,
+    .declaredPermissionCount = 0
+};
+} // namespace
+
+ENGINE_MODULE_EXPORT const engine::EngineModulePluginEntry *engineQueryModulePlugin()
+{
+    return &windowPluginEntry;
+}
