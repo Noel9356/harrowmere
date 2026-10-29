@@ -321,7 +321,8 @@ void printUsage(
     std::ostream &stream
 )
 {
-    stream << "harrowmere " << harrowmereVersionString << " - simulation-heavy sandbox RPG on a modular capability-driven engine\n"
+    stream << "harrowmere " << harrowmereVersionString
+           << " - simulation-heavy sandbox RPG on a modular capability-driven engine\n"
            << "\n"
            << "usage: harrowmere [options]\n"
            << "\n"
@@ -669,8 +670,8 @@ int HarrowmereApp::run(
         std::cout << "simulation capability acquired (" << harrowmere::SimCapability::capabilityName << ")\n";
     } catch (const std::exception &error)
     {
-        std::cerr << "harrowmere startup failed: the simulation capability (" << harrowmere::SimCapability::capabilityName
-                  << ") is not available: " << error.what() << "\n"
+        std::cerr << "harrowmere startup failed: the simulation capability ("
+                  << harrowmere::SimCapability::capabilityName << ") is not available: " << error.what() << "\n"
                   << "the harrowmere_core mod is missing, failed to load, or provides nothing - "
                   << "check build/runtime/mods/ and the assembly's [trust] section\n";
         exitCode = 1;

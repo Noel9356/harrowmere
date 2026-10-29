@@ -13,16 +13,18 @@ namespace
 // Pinned package defaults - the exact values mods/harrowmere_core/config.toml
 // ships (task 0.1). They are configuration knobs, not Appendix A rows
 // (common.md Appendix A header: "Config-flavored knobs are not A-rows").
-constexpr std::uint32_t kDefaultTickRate = 10;          // D-TICK-1 (§4.4)
-constexpr std::uint32_t kDefaultTimeScale = 60;         // D-TIME-1 (§4.4)
-constexpr std::uint32_t kDefaultAutosaveGameHours = 6;  // task 0.1 config.toml
-constexpr std::uint64_t kDefaultSeed = 0;               // 0 = random, persisted by 7.1
-constexpr const char *kFallbackModDirectory = "mods";   // task 0.4 pinned decision
+constexpr std::uint32_t kDefaultTickRate          = 10;     // D-TICK-1 (§4.4)
+constexpr std::uint32_t kDefaultTimeScale         = 60;     // D-TIME-1 (§4.4)
+constexpr std::uint32_t kDefaultAutosaveGameHours = 6;      // task 0.1 config.toml
+constexpr std::uint64_t kDefaultSeed              = 0;      // 0 = random, persisted by 7.1
+constexpr const char *kFallbackModDirectory       = "mods"; // task 0.4 pinned decision
 
 // A [harrowmere] integer must fit the unsigned field it feeds; anything else
 // (negative, oversized) is treated as unset - the pinned default applies and
 // the configuration stays safe to hand to the sim.
-std::uint32_t u32OrDefault(const std::optional<std::int64_t> &value, std::uint32_t fallback)
+std::uint32_t u32OrDefault(
+    const std::optional<std::int64_t> &value, std::uint32_t fallback
+)
 {
     if (!value.has_value())
     {
@@ -37,7 +39,9 @@ std::uint32_t u32OrDefault(const std::optional<std::int64_t> &value, std::uint32
 
 } // namespace
 
-bool isDeclaredConfigKey(std::string_view dottedKey)
+bool isDeclaredConfigKey(
+    std::string_view dottedKey
+)
 {
     for (const char *declared : kDeclaredConfigKeys)
     {
@@ -49,25 +53,31 @@ bool isDeclaredConfigKey(std::string_view dottedKey)
     return false;
 }
 
-GameConfig::GameConfig(std::uint32_t tickRate, std::uint32_t timeScale,
-                       std::uint32_t autosaveGameHours, std::uint64_t seed,
-                       std::string modDirectory)
-    : tickRate_(tickRate),
-      timeScale_(timeScale),
-      autosaveGameHours_(autosaveGameHours),
-      seed_(seed),
+GameConfig::GameConfig(
+    std::uint32_t tickRate,
+    std::uint32_t timeScale,
+    std::uint32_t autosaveGameHours,
+    std::uint64_t seed,
+    std::string modDirectory
+)
+    : tickRate_(tickRate), timeScale_(timeScale), autosaveGameHours_(autosaveGameHours), seed_(seed),
       modDirectory_(std::move(modDirectory))
-{
-}
+{}
 
-GameConfig GameConfig::withValues(std::uint32_t tickRate, std::uint32_t timeScale,
-                                  std::uint32_t autosaveGameHours, std::uint64_t seed,
-                                  std::string modDirectory)
+GameConfig GameConfig::withValues(
+    std::uint32_t tickRate,
+    std::uint32_t timeScale,
+    std::uint32_t autosaveGameHours,
+    std::uint64_t seed,
+    std::string modDirectory
+)
 {
     return GameConfig(tickRate, timeScale, autosaveGameHours, seed, std::move(modDirectory));
 }
 
-GameConfig GameConfig::load(const ConfigSource &source)
+GameConfig GameConfig::load(
+    const ConfigSource &source
+)
 {
     // The wrapper reads ONLY declared keys (task 0.4 pinned decision; the
     // kernel's startup validation walks the effective table on its side).
@@ -78,12 +88,10 @@ GameConfig GameConfig::load(const ConfigSource &source)
     assert(isDeclaredConfigKey("harrowmere.autosave_game_hours"));
     assert(isDeclaredConfigKey("harrowmere.seed"));
 
-    const std::uint32_t tickRate = u32OrDefault(source.integer("harrowmere", "tick_rate"),
-                                                kDefaultTickRate);
-    const std::uint32_t timeScale = u32OrDefault(source.integer("harrowmere", "time_scale"),
-                                                 kDefaultTimeScale);
-    const std::uint32_t autosave = u32OrDefault(source.integer("harrowmere", "autosave_game_hours"),
-                                                kDefaultAutosaveGameHours);
+    const std::uint32_t tickRate  = u32OrDefault(source.integer("harrowmere", "tick_rate"), kDefaultTickRate);
+    const std::uint32_t timeScale = u32OrDefault(source.integer("harrowmere", "time_scale"), kDefaultTimeScale);
+    const std::uint32_t autosave
+        = u32OrDefault(source.integer("harrowmere", "autosave_game_hours"), kDefaultAutosaveGameHours);
 
     // The seed is u64-wide; the TOML integer reader is i64-wide, so the
     // usable range is [0, INT64_MAX] - and a negative seed is authoring
@@ -135,10 +143,11 @@ const std::string &GameConfig::modDirectory() const
     return modDirectory_;
 }
 
-std::string GameConfig::coreDataDirectory(std::string_view executableDir) const
+std::string GameConfig::coreDataDirectory(
+    std::string_view executableDir
+) const
 {
-    return (std::filesystem::path(executableDir) / modDirectory_ / "harrowmere_core" / "data")
-        .string();
+    return (std::filesystem::path(executableDir) / modDirectory_ / "harrowmere_core" / "data").string();
 }
 
 } // namespace harrowmere::data

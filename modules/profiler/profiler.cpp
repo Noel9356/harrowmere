@@ -70,9 +70,9 @@ std::string formatRow(
 ProfilerModule::ProfilerModule()
 {
     componentManifest = ComponentManifest{
-        .name                 = "profiler",
-        .kind                 = ComponentKind::Module,
-        .version              = "0.1.0",
+        .name    = "profiler",
+        .kind    = ComponentKind::Module,
+        .version = "0.1.0",
         // The implementation-bound member of the "profiler" family: the CPU-side
         // instrumentation implementation. Consumers demand the family; a run
         // that needs THIS implementation names the member exactly.

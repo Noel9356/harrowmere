@@ -15,7 +15,9 @@ namespace
 constexpr std::size_t kMaxValidationErrors = 100;
 
 // Human name of a JSON value's actual type (message text only).
-std::string jsonTypeName(const Json &value)
+std::string jsonTypeName(
+    const Json &value
+)
 {
     switch (value.type())
     {
@@ -43,7 +45,9 @@ std::string jsonTypeName(const Json &value)
 }
 
 // Human name of a schema-side type (message text only).
-const char *schemaTypeName(JsonType type)
+const char *schemaTypeName(
+    JsonType type
+)
 {
     switch (type)
     {
@@ -66,7 +70,9 @@ const char *schemaTypeName(JsonType type)
 }
 
 // "A, B, C" - the closed set as it appears in error messages.
-std::string joinNames(const std::vector<std::string> &names)
+std::string joinNames(
+    const std::vector<std::string> &names
+)
 {
     std::string joined;
     for (std::size_t i = 0; i < names.size(); ++i)
@@ -82,7 +88,9 @@ std::string joinNames(const std::vector<std::string> &names)
 
 // The grid value of an INTEGER json number, clamped at the std::int64_t range
 // (a JSON unsigned above INT64_MAX is reported against the field's bounds).
-std::int64_t integerValueOrClamp(const Json &value)
+std::int64_t integerValueOrClamp(
+    const Json &value
+)
 {
     if (value.is_number_unsigned())
     {
@@ -100,17 +108,21 @@ std::int64_t integerValueOrClamp(const Json &value)
 
 Schema::Schema() = default;
 
-Schema Schema::scalar(JsonType type, std::int64_t min, std::int64_t max)
+Schema Schema::scalar(
+    JsonType type, std::int64_t min, std::int64_t max
+)
 {
     Schema schema;
-    schema.kind_ = Kind::Scalar;
+    schema.kind_       = Kind::Scalar;
     schema.scalarType_ = type;
-    schema.min_ = min;
-    schema.max_ = max;
+    schema.min_        = min;
+    schema.max_        = max;
     return schema;
 }
 
-Schema Schema::enumeration(std::span<const char *const> values)
+Schema Schema::enumeration(
+    std::span<const char *const> values
+)
 {
     Schema schema;
     schema.kind_ = Kind::Enum;
@@ -118,21 +130,26 @@ Schema Schema::enumeration(std::span<const char *const> values)
     return schema;
 }
 
-Schema Schema::arrayOf(const Schema &element)
+Schema Schema::arrayOf(
+    const Schema &element
+)
 {
     Schema schema;
-    schema.kind_ = Kind::ArrayOf;
+    schema.kind_    = Kind::ArrayOf;
     schema.element_ = std::make_shared<Schema>(element);
     return schema;
 }
 
-Schema &Schema::field(const char *name, JsonType type, bool required)
+Schema &Schema::field(
+    const char *name, JsonType type, bool required
+)
 {
     return field(name, type, kNoMinBound, kNoMaxBound, required);
 }
 
-Schema &Schema::field(const char *name, JsonType type,
-                      std::int64_t min, std::int64_t max, bool required)
+Schema &Schema::field(
+    const char *name, JsonType type, std::int64_t min, std::int64_t max, bool required
+)
 {
     Entry entry;
     entry.spec = FieldSpec{name, type, required, min, max};
@@ -140,16 +157,20 @@ Schema &Schema::field(const char *name, JsonType type,
     return *this;
 }
 
-Schema &Schema::array(const char *name, const Schema &element, bool required)
+Schema &Schema::array(
+    const char *name, const Schema &element, bool required
+)
 {
     Entry entry;
-    entry.spec = FieldSpec{name, JsonType::Array, required, kNoMinBound, kNoMaxBound};
+    entry.spec    = FieldSpec{name, JsonType::Array, required, kNoMinBound, kNoMaxBound};
     entry.element = std::make_shared<Schema>(element);
     entries_.push_back(std::move(entry));
     return *this;
 }
 
-Schema &Schema::enumerate(const char *name, std::span<const char *const> values, bool required)
+Schema &Schema::enumerate(
+    const char *name, std::span<const char *const> values, bool required
+)
 {
     Entry entry;
     entry.spec = FieldSpec{name, JsonType::String, required, kNoMinBound, kNoMaxBound};
@@ -158,33 +179,42 @@ Schema &Schema::enumerate(const char *name, std::span<const char *const> values,
     return *this;
 }
 
-Schema &Schema::map(const char *name, JsonType valueType,
-                    std::span<const char *const> keys, bool required)
+Schema &Schema::map(
+    const char *name, JsonType valueType, std::span<const char *const> keys, bool required
+)
 {
     Entry entry;
-    entry.spec = FieldSpec{name, JsonType::Object, required, kNoMinBound, kNoMaxBound};
-    entry.isMap = true;
+    entry.spec         = FieldSpec{name, JsonType::Object, required, kNoMinBound, kNoMaxBound};
+    entry.isMap        = true;
     entry.mapValueType = valueType;
     entry.mapKeys.assign(keys.begin(), keys.end());
     entries_.push_back(std::move(entry));
     return *this;
 }
 
-std::vector<DataError> Schema::validate(const Json &value, const std::string &filePath) const
+std::vector<DataError> Schema::validate(
+    const Json &value, const std::string &filePath
+) const
 {
     std::vector<DataError> errors;
     validateAt(value, filePath, std::string{}, errors);
     if (errors.size() >= kMaxValidationErrors)
     {
-        errors.push_back(DataError{
-            filePath, std::string{},
-            "error report capped at " + std::to_string(kMaxValidationErrors) +
-                " entries - fix the reported errors and re-validate"});
+        errors.push_back(
+            DataError{
+                filePath,
+                std::string{},
+                "error report capped at " + std::to_string(kMaxValidationErrors)
+                    + " entries - fix the reported errors and re-validate"
+            }
+        );
     }
     return errors;
 }
 
-bool Schema::hasEntry(const char *name) const
+bool Schema::hasEntry(
+    const char *name
+) const
 {
     for (const Entry &entry : entries_)
     {
@@ -196,8 +226,9 @@ bool Schema::hasEntry(const char *name) const
     return false;
 }
 
-void Schema::validateAt(const Json &value, const std::string &file,
-                        const std::string &pointer, std::vector<DataError> &errors) const
+void Schema::validateAt(
+    const Json &value, const std::string &file, const std::string &pointer, std::vector<DataError> &errors
+) const
 {
     switch (kind_)
     {
@@ -207,12 +238,10 @@ void Schema::validateAt(const Json &value, const std::string &file,
     case Kind::Enum:
         validateEnum(enumValues_, value, file, pointer, errors);
         return;
-    case Kind::ArrayOf:
-    {
+    case Kind::ArrayOf: {
         if (!value.is_array())
         {
-            errors.push_back(DataError{file, pointer,
-                                       "expected array, got " + jsonTypeName(value)});
+            errors.push_back(DataError{file, pointer, "expected array, got " + jsonTypeName(value)});
             return;
         }
         std::size_t index = 0;
@@ -233,13 +262,13 @@ void Schema::validateAt(const Json &value, const std::string &file,
     }
 }
 
-void Schema::validateRecord(const Json &value, const std::string &file,
-                            const std::string &pointer, std::vector<DataError> &errors) const
+void Schema::validateRecord(
+    const Json &value, const std::string &file, const std::string &pointer, std::vector<DataError> &errors
+) const
 {
     if (!value.is_object())
     {
-        errors.push_back(DataError{file, pointer,
-                                   "expected object (record), got " + jsonTypeName(value)});
+        errors.push_back(DataError{file, pointer, "expected object (record), got " + jsonTypeName(value)});
         return;
     }
 
@@ -254,9 +283,13 @@ void Schema::validateRecord(const Json &value, const std::string &file,
         }
         if (!hasEntry(member.key().c_str()))
         {
-            errors.push_back(DataError{
-                file, pointer + "/" + pointerEscape(member.key()),
-                "unexpected field '" + member.key() + "' (not in the record's schema - strict loader)"});
+            errors.push_back(
+                DataError{
+                    file,
+                    pointer + "/" + pointerEscape(member.key()),
+                    "unexpected field '" + member.key() + "' (not in the record's schema - strict loader)"
+                }
+            );
         }
     }
 
@@ -267,15 +300,19 @@ void Schema::validateRecord(const Json &value, const std::string &file,
             return;
         }
         const std::string fieldPointer = pointer + "/" + pointerEscape(entry.spec.name);
-        const auto found = value.find(entry.spec.name);
+        const auto found               = value.find(entry.spec.name);
         if (found == value.end())
         {
             if (entry.spec.required)
             {
-                errors.push_back(DataError{
-                    file, fieldPointer,
-                    "required field '" + std::string(entry.spec.name) + "' (" +
-                        schemaTypeName(entry.spec.type) + ") is missing"});
+                errors.push_back(
+                    DataError{
+                        file,
+                        fieldPointer,
+                        "required field '" + std::string(entry.spec.name) + "' (" + schemaTypeName(entry.spec.type)
+                            + ") is missing"
+                    }
+                );
             }
             continue;
         }
@@ -283,15 +320,19 @@ void Schema::validateRecord(const Json &value, const std::string &file,
     }
 }
 
-void Schema::validateEntry(const Entry &entry, const Json &value, const std::string &file,
-                           const std::string &fieldPointer, std::vector<DataError> &errors) const
+void Schema::validateEntry(
+    const Entry &entry,
+    const Json &value,
+    const std::string &file,
+    const std::string &fieldPointer,
+    std::vector<DataError> &errors
+) const
 {
     if (entry.isMap)
     {
         if (!value.is_object())
         {
-            errors.push_back(DataError{file, fieldPointer,
-                                       "expected object (map), got " + jsonTypeName(value)});
+            errors.push_back(DataError{file, fieldPointer, "expected object (map), got " + jsonTypeName(value)});
             return;
         }
         for (auto member = value.begin(); member != value.end(); ++member)
@@ -301,7 +342,7 @@ void Schema::validateEntry(const Entry &entry, const Json &value, const std::str
                 return;
             }
             const std::string valuePointer = fieldPointer + "/" + pointerEscape(member.key());
-            bool keyKnown = true;
+            bool keyKnown                  = true;
             if (!entry.mapKeys.empty())
             {
                 keyKnown = false;
@@ -315,16 +356,21 @@ void Schema::validateEntry(const Entry &entry, const Json &value, const std::str
                 }
                 if (!keyKnown)
                 {
-                    errors.push_back(DataError{
-                        file, valuePointer,
-                        "unknown map key '" + member.key() + "' (expected one of [" +
-                            joinNames(entry.mapKeys) + "])"});
+                    errors.push_back(
+                        DataError{
+                            file,
+                            valuePointer,
+                            "unknown map key '" + member.key() + "' (expected one of [" + joinNames(entry.mapKeys)
+                                + "])"
+                        }
+                    );
                 }
             }
             if (keyKnown)
             {
-                validateScalar(member.value(), file, valuePointer, entry.mapValueType,
-                               kNoMinBound, kNoMaxBound, errors);
+                validateScalar(
+                    member.value(), file, valuePointer, entry.mapValueType, kNoMinBound, kNoMaxBound, errors
+                );
             }
         }
         return;
@@ -334,8 +380,7 @@ void Schema::validateEntry(const Entry &entry, const Json &value, const std::str
     {
         if (!value.is_array())
         {
-            errors.push_back(DataError{file, fieldPointer,
-                                       "expected array, got " + jsonTypeName(value)});
+            errors.push_back(DataError{file, fieldPointer, "expected array, got " + jsonTypeName(value)});
             return;
         }
         std::size_t index = 0;
@@ -345,8 +390,7 @@ void Schema::validateEntry(const Entry &entry, const Json &value, const std::str
             {
                 return;
             }
-            entry.element->validateAt(element, file,
-                                      fieldPointer + "/" + std::to_string(index), errors);
+            entry.element->validateAt(element, file, fieldPointer + "/" + std::to_string(index), errors);
             ++index;
         }
         return;
@@ -358,14 +402,18 @@ void Schema::validateEntry(const Entry &entry, const Json &value, const std::str
         return;
     }
 
-    validateScalar(value, file, fieldPointer, entry.spec.type,
-                   entry.spec.min, entry.spec.max, errors);
+    validateScalar(value, file, fieldPointer, entry.spec.type, entry.spec.min, entry.spec.max, errors);
 }
 
-void Schema::validateScalar(const Json &value, const std::string &file,
-                            const std::string &pointer, JsonType type,
-                            std::int64_t min, std::int64_t max,
-                            std::vector<DataError> &errors) const
+void Schema::validateScalar(
+    const Json &value,
+    const std::string &file,
+    const std::string &pointer,
+    JsonType type,
+    std::int64_t min,
+    std::int64_t max,
+    std::vector<DataError> &errors
+) const
 {
     switch (type)
     {
@@ -399,71 +447,76 @@ void Schema::validateScalar(const Json &value, const std::string &file,
             errors.push_back(DataError{file, pointer, "expected object, got " + jsonTypeName(value)});
         }
         return;
-    case JsonType::Integer:
-    {
+    case JsonType::Integer: {
         if (value.is_number_float())
         {
-            errors.push_back(DataError{file, pointer,
-                                       "expected integer, got fractional number " + value.dump()});
+            errors.push_back(DataError{file, pointer, "expected integer, got fractional number " + value.dump()});
             return;
         }
         if (!value.is_number_integer())
         {
-            errors.push_back(DataError{file, pointer,
-                                       "expected integer, got " + jsonTypeName(value)});
+            errors.push_back(DataError{file, pointer, "expected integer, got " + jsonTypeName(value)});
             return;
         }
         const std::int64_t number = integerValueOrClamp(value);
         if (number < min || number > max)
         {
-            errors.push_back(DataError{
-                file, pointer,
-                "expected integer in [" + std::to_string(min) + ", " + std::to_string(max) +
-                    "], got " + std::to_string(number)});
+            errors.push_back(
+                DataError{
+                    file,
+                    pointer,
+                    "expected integer in [" + std::to_string(min) + ", " + std::to_string(max) + "], got "
+                        + std::to_string(number)
+                }
+            );
         }
         return;
     }
-    case JsonType::Scaled:
-    {
+    case JsonType::Scaled: {
         std::int64_t grid = 0;
-        bool fractional = false;
+        bool fractional   = false;
         if (value.is_number_float())
         {
-            grid = scaleToGrid(value.get<double>());
+            grid       = scaleToGrid(value.get<double>());
             fractional = true;
-        }
-        else if (value.is_number_integer())
+        } else if (value.is_number_integer())
         {
             grid = integerValueOrClamp(value);
-        }
-        else
+        } else
         {
-            errors.push_back(DataError{file, pointer,
-                                       "expected scaled number, got " + jsonTypeName(value)});
+            errors.push_back(DataError{file, pointer, "expected scaled number, got " + jsonTypeName(value)});
             return;
         }
         if (grid < min || grid > max)
         {
-            errors.push_back(DataError{
-                file, pointer,
-                "expected scaled value in [" + std::to_string(min) + ", " + std::to_string(max) +
-                    "] on the SCALE grid (fractional input is multiplied by SCALE), got " +
-                    std::to_string(grid) + (fractional ? " (from raw " + value.dump() + ")" : "")});
+            errors.push_back(
+                DataError{
+                    file,
+                    pointer,
+                    "expected scaled value in [" + std::to_string(min) + ", " + std::to_string(max)
+                        + "] on the SCALE grid (fractional input is multiplied by SCALE), got " + std::to_string(grid)
+                        + (fractional ? " (from raw " + value.dump() + ")" : "")
+                }
+            );
         }
         return;
     }
     }
 }
 
-void Schema::validateEnum(const std::vector<std::string> &values, const Json &value,
-                          const std::string &file, const std::string &pointer,
-                          std::vector<DataError> &errors) const
+void Schema::validateEnum(
+    const std::vector<std::string> &values,
+    const Json &value,
+    const std::string &file,
+    const std::string &pointer,
+    std::vector<DataError> &errors
+) const
 {
     if (!value.is_string())
     {
-        errors.push_back(DataError{
-            file, pointer,
-            "expected string (one of [" + joinNames(values) + "]), got " + jsonTypeName(value)});
+        errors.push_back(
+            DataError{file, pointer, "expected string (one of [" + joinNames(values) + "]), got " + jsonTypeName(value)}
+        );
         return;
     }
     const std::string text = value.get<std::string>();
@@ -474,9 +527,7 @@ void Schema::validateEnum(const std::vector<std::string> &values, const Json &va
             return;
         }
     }
-    errors.push_back(DataError{
-        file, pointer,
-        "expected one of [" + joinNames(values) + "], got '" + text + "'"});
+    errors.push_back(DataError{file, pointer, "expected one of [" + joinNames(values) + "], got '" + text + "'"});
 }
 
 } // namespace harrowmere::data

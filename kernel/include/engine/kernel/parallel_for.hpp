@@ -95,7 +95,8 @@ inline std::size_t defaultWorkerCount()
 
 // The shared fork-join mechanics over an arbitrary body reference. Internal:
 // both public entry points below funnel here.
-template <typename Body> inline void parallelForDispatch(
+template <typename Body>
+inline void parallelForDispatch(
     std::size_t itemCount, Body &chunkBody
 )
 {
@@ -155,7 +156,8 @@ template <typename Body> inline void parallelForDispatch(
 
 // The primary form: the body is any callable taking (begin, end) - a lambda
 // at every call site today. Direct call, fully inlinable.
-template <typename Body> inline void parallelFor(
+template <typename Body>
+inline void parallelFor(
     std::size_t itemCount, Body &&chunkBody
 )
 {

@@ -16,11 +16,12 @@
 #include <string>
 #include <vector>
 
-#include "core/enums.hpp"  // StatType, SkillType
+#include "core/enums.hpp" // StatType, SkillType
 
-namespace harrowmere::data {
+namespace harrowmere::data
+{
 
-struct DataError;  // forward decl (task 0.4)
+struct DataError; // forward decl (task 0.4)
 
 // ClassData — runtime form of one classes.json row.
 //
@@ -28,12 +29,13 @@ struct DataError;  // forward decl (task 0.4)
 // NPC generator (1.5) multiplies a class's stat weights against the
 // species statMultiplier when seeding an NPC's starting stats. Missing
 // keys default to SCALE (1.0x weight = no adjustment).
-struct ClassData {
+struct ClassData
+{
     std::uint32_t id = 0;
-    std::string   key;
+    std::string key;
 
     // Expanded from JSON map; missing keys → SCALE (1.0x weight).
-    std::array<std::uint32_t, static_cast<std::size_t>(StatType::COUNT)>  statWeights{};
+    std::array<std::uint32_t, static_cast<std::size_t>(StatType::COUNT)> statWeights{};
     std::array<std::uint32_t, static_cast<std::size_t>(SkillType::COUNT)> skillWeights{};
 
     // startingSkills: integer skill levels granted at NPC creation.
@@ -42,21 +44,31 @@ struct ClassData {
 };
 
 // ClassesLoader — parses + validates data/classes.json.
-class ClassesLoader {
+class ClassesLoader
+{
 public:
-    ClassesLoader() = default;
-    ~ClassesLoader() = default;
-    ClassesLoader(const ClassesLoader&) = delete;
-    ClassesLoader& operator=(const ClassesLoader&) = delete;
+    ClassesLoader()                                 = default;
+    ~ClassesLoader()                                = default;
+    ClassesLoader(const ClassesLoader &)            = delete;
+    ClassesLoader &operator=(const ClassesLoader &) = delete;
 
-    bool load(const std::string& jsonPath, std::vector<DataError>& errors);
+    bool load(const std::string &jsonPath, std::vector<DataError> &errors);
 
-    const ClassData* classById(std::uint32_t id) const;
-    const ClassData* classByKey(const std::string& key) const;
+    const ClassData *classById(std::uint32_t id) const;
+    const ClassData *classByKey(const std::string &key) const;
 
-    bool        empty() const noexcept { return classes_.empty(); }
-    std::size_t size()  const noexcept { return classes_.size(); }
-    const std::vector<ClassData>& all() const noexcept { return classes_; }
+    bool empty() const noexcept
+    {
+        return classes_.empty();
+    }
+    std::size_t size() const noexcept
+    {
+        return classes_.size();
+    }
+    const std::vector<ClassData> &all() const noexcept
+    {
+        return classes_;
+    }
 
 private:
     std::vector<ClassData> classes_;

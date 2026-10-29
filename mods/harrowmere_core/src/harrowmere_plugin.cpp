@@ -37,14 +37,14 @@ public:
         // `provides`; the requirement wiring is package data (the kernel
         // resolves the graph from mod.toml alone). Keep the two files in
         // lockstep - a drift is a precise startup error, by design.
-        manifest_.name                  = "harrowmere_core";
-        manifest_.kind                  = engine::ComponentKind::SharedLibraryMod;
-        manifest_.version               = "0.1.0";
-        manifest_.providedCapabilities  = {"harrowmere.core"};
-        manifest_.requiredCapabilities  = {"logging", "scene", "input"};
-        manifest_.optionalCapabilities  = {"physics", "audio", "animation", "asset"};
-        manifest_.requiredPermissions   = {"filesystem.write"};
-        manifest_.knownConfigKeys       = {
+        manifest_.name                 = "harrowmere_core";
+        manifest_.kind                 = engine::ComponentKind::SharedLibraryMod;
+        manifest_.version              = "0.1.0";
+        manifest_.providedCapabilities = {"harrowmere.core"};
+        manifest_.requiredCapabilities = {"logging", "scene", "input"};
+        manifest_.optionalCapabilities = {"physics", "audio", "animation", "asset"};
+        manifest_.requiredPermissions  = {"filesystem.write"};
+        manifest_.knownConfigKeys      = {
             "harrowmere.tick_rate",
             "harrowmere.time_scale",
             "harrowmere.autosave_game_hours",
@@ -57,7 +57,9 @@ public:
         return manifest_;
     }
 
-    void construct(engine::ComponentContext &context) override
+    void construct(
+        engine::ComponentContext &context
+    ) override
     {
         // The logging capability is the graph's root dependency; every later
         // system logs through the wrapper task 0.5 pins on top of this sink.
@@ -79,7 +81,9 @@ public:
 
     // The pull-based provider hook: the kernel asks at acquisition time,
     // every time - nothing is registered anywhere between the phases.
-    void *capabilityPointerFor(const std::string &capabilityName) override
+    void *capabilityPointerFor(
+        const std::string &capabilityName
+    ) override
     {
         if (capabilityName == harrowmere::SimCapability::capabilityName)
         {
@@ -89,7 +93,9 @@ public:
     }
 
 private:
-    void log(engine::LogLevel level, const std::string &message) const
+    void log(
+        engine::LogLevel level, const std::string &message
+    ) const
     {
         if (logging_ != nullptr)
         {
@@ -107,7 +113,9 @@ engine::ModInterface *createHarrowmereCoreMod()
     return new HarrowmereCoreMod();
 }
 
-void destroyHarrowmereCoreMod(engine::ModInterface *mod)
+void destroyHarrowmereCoreMod(
+    engine::ModInterface *mod
+)
 {
     delete mod;
 }

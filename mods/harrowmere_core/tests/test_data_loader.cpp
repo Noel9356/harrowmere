@@ -34,12 +34,9 @@ using harrowmere::SCALE;
 
 // Closed sets the schema DSL consumes - passed as arrays (a braced list does
 // not implicitly convert to std::span; the pinned API takes spans).
-constexpr const char *kSuspicionActs[] = {
-    "CROUCH", "UNLIT", "MASKED", "TRESPASS", "BLOODSTAINED", "FLEE"};
-constexpr const char *kSuspicionMasks[] = {
-    "SETTLEMENT", "NIGHT", "PRIVATE_PROPERTY", "MARKET"};
-constexpr const char *kStatNames[] = {
-    "STRENGTH", "DEFENCE", "AGILITY", "INTELLIGENCE", "ENDURANCE", "PERCEPTION"};
+constexpr const char *kSuspicionActs[]  = {"CROUCH", "UNLIT", "MASKED", "TRESPASS", "BLOODSTAINED", "FLEE"};
+constexpr const char *kSuspicionMasks[] = {"SETTLEMENT", "NIGHT", "PRIVATE_PROPERTY", "MARKET"};
+constexpr const char *kStatNames[]      = {"STRENGTH", "DEFENCE", "AGILITY", "INTELLIGENCE", "ENDURANCE", "PERCEPTION"};
 
 // Scratch files live under the system temp dir, one fixed subdirectory - the
 // tests are deterministic and never write into the repository.
@@ -53,7 +50,9 @@ const std::filesystem::path &scratchDir()
     return dir;
 }
 
-std::string writeTempFile(const char *name, std::string_view bytes)
+std::string writeTempFile(
+    const char *name, std::string_view bytes
+)
 {
     const auto path = scratchDir() / name;
     std::ofstream out(path, std::ios::binary);
@@ -63,7 +62,9 @@ std::string writeTempFile(const char *name, std::string_view bytes)
 
 // parseJsonText is the loader's memory face; every strictness behavior is
 // identical to loadJsonFile's, with a stable label for the error's file field.
-harrowmere::data::Json parseOrThrow(std::string_view text)
+harrowmere::data::Json parseOrThrow(
+    std::string_view text
+)
 {
     const auto parsed = harrowmere::data::parseJsonText(text, "inline.json");
     REQUIRE(parsed.isOk());
@@ -74,7 +75,9 @@ harrowmere::data::Json parseOrThrow(std::string_view text)
 
 // ---- the five pinned tests ---------------------------------------------------
 
-TEST_CASE("TestDataLoader_MissingRequiredField_ReportsFileAndPath")
+TEST_CASE(
+    "TestDataLoader_MissingRequiredField_ReportsFileAndPath"
+)
 {
     using namespace harrowmere::data;
 
@@ -84,7 +87,7 @@ TEST_CASE("TestDataLoader_MissingRequiredField_ReportsFileAndPath")
         .field("notes", JsonType::String, false); // optional (species rows carry "notes")
 
     const std::string path = writeTempFile("missing_required.json", R"({"id": 7, "notes": "x"})");
-    const auto loaded = loadJsonFile(path);
+    const auto loaded      = loadJsonFile(path);
     REQUIRE(loaded.isOk());
 
     const std::vector<DataError> errors = items.validate(loaded.value(), path);
@@ -97,13 +100,15 @@ TEST_CASE("TestDataLoader_MissingRequiredField_ReportsFileAndPath")
     CHECK(errors[0].toString().find(path + ": /key: ") == 0);
 }
 
-TEST_CASE("TestDataLoader_ScaledNumber_RoundsToScaleGrid")
+TEST_CASE(
+    "TestDataLoader_ScaledNumber_RoundsToScaleGrid"
+)
 {
     using namespace harrowmere::data;
 
     Schema multipliers;
     multipliers.field("value", JsonType::Scaled, 0,
-                      static_cast<std::int64_t>(10 * SCALE)); // [0, 10.0x] on the grid
+        static_cast<std::int64_t>(10 * SCALE)); // [0, 10.0x] on the grid
 
     const auto check = [&](std::string_view text, std::int64_t expectedGrid) {
         const Json json = parseOrThrow(text);
@@ -129,7 +134,7 @@ TEST_CASE("TestDataLoader_ScaledNumber_RoundsToScaleGrid")
     // number and the raw authoring value both present.
     Schema strict;
     strict.field("value", JsonType::Scaled, 0, static_cast<std::int64_t>(SCALE));
-    const Json tooBig = parseOrThrow(R"({"value": 1.5})"); // -> 15000 > SCALE
+    const Json tooBig                   = parseOrThrow(R"({"value": 1.5})"); // -> 15000 > SCALE
     const std::vector<DataError> errors = strict.validate(tooBig, "inline.json");
     REQUIRE(errors.size() == 1);
     CHECK(errors[0].jsonPointer == "/value");
@@ -143,12 +148,14 @@ TEST_CASE("TestDataLoader_ScaledNumber_RoundsToScaleGrid")
     REQUIRE(integral.validate(fractional, "inline.json").size() == 1);
 }
 
-TEST_CASE("TestDataLoader_DuplicateKey_Rejected")
+TEST_CASE(
+    "TestDataLoader_DuplicateKey_Rejected"
+)
 {
     using namespace harrowmere::data;
 
     const std::string path = writeTempFile("duplicate_key.json", R"({"id": 1, "id": 2})");
-    const auto loaded = loadJsonFile(path);
+    const auto loaded      = loadJsonFile(path);
     REQUIRE(loaded.isErr());
     CHECK(loaded.error().file == path);
     CHECK(loaded.error().jsonPointer == "/id");
@@ -165,7 +172,9 @@ TEST_CASE("TestDataLoader_DuplicateKey_Rejected")
     CHECK(fine.isOk());
 }
 
-TEST_CASE("TestDataMerge_ObjectDeep_ArrayReplace")
+TEST_CASE(
+    "TestDataMerge_ObjectDeep_ArrayReplace"
+)
 {
     using namespace harrowmere::data;
 
@@ -197,7 +206,9 @@ TEST_CASE("TestDataMerge_ObjectDeep_ArrayReplace")
     CHECK(base["keep"]["arr"].size() == 3);
 }
 
-TEST_CASE("TestDataLoader_AllShippedFilesValidate")
+TEST_CASE(
+    "TestDataLoader_AllShippedFilesValidate"
+)
 {
     using namespace harrowmere::data;
 
@@ -232,7 +243,9 @@ TEST_CASE("TestDataLoader_AllShippedFilesValidate")
 
 // ---- supplementary coverage (beyond the card's pinned minimum) ---------------
 
-TEST_CASE("TestDataLoader_TrailingGarbage_Rejected")
+TEST_CASE(
+    "TestDataLoader_TrailingGarbage_Rejected"
+)
 {
     using namespace harrowmere::data;
 
@@ -253,7 +266,9 @@ TEST_CASE("TestDataLoader_TrailingGarbage_Rejected")
     CHECK(empty.isErr());
 }
 
-TEST_CASE("TestDataLoader_Utf8InvalidByte_Rejected")
+TEST_CASE(
+    "TestDataLoader_Utf8InvalidByte_Rejected"
+)
 {
     using namespace harrowmere::data;
 
@@ -276,7 +291,9 @@ TEST_CASE("TestDataLoader_Utf8InvalidByte_Rejected")
     CHECK(unicode.value()["name"] == Json("caf\xC3\xA9"));
 }
 
-TEST_CASE("TestDataLoader_FileMissing_ReportsFile")
+TEST_CASE(
+    "TestDataLoader_FileMissing_ReportsFile"
+)
 {
     using namespace harrowmere::data;
 
@@ -287,32 +304,35 @@ TEST_CASE("TestDataLoader_FileMissing_ReportsFile")
     CHECK(missing.error().message.find("cannot open") != std::string::npos);
 }
 
-TEST_CASE("TestDataLoader_UnknownField_Rejected")
+TEST_CASE(
+    "TestDataLoader_UnknownField_Rejected"
+)
 {
     using namespace harrowmere::data;
 
     Schema row;
     row.field("id", JsonType::Integer).field("key", JsonType::String);
     // "raritty" is exactly the authoring typo strictness exists to catch.
-    const Json typo = parseOrThrow(R"({"id": 1, "key": "iron_sword", "raritty": 2000})");
+    const Json typo                     = parseOrThrow(R"({"id": 1, "key": "iron_sword", "raritty": 2000})");
     const std::vector<DataError> errors = row.validate(typo, "items.json");
     REQUIRE(errors.size() == 1);
     CHECK(errors[0].jsonPointer == "/raritty");
     CHECK(errors[0].message.find("unexpected field") != std::string::npos);
 }
 
-TEST_CASE("TestDataSchema_EnumField_RejectsUnknownValueAndListsAllowed")
+TEST_CASE(
+    "TestDataSchema_EnumField_RejectsUnknownValueAndListsAllowed"
+)
 {
     using namespace harrowmere::data;
 
     Schema row;
-    row.enumerate("act", kSuspicionActs)
-        .field("weight", JsonType::Scaled, 0, static_cast<std::int64_t>(SCALE));
+    row.enumerate("act", kSuspicionActs).field("weight", JsonType::Scaled, 0, static_cast<std::int64_t>(SCALE));
 
     const Json good = parseOrThrow(R"({"act": "CROUCH", "weight": 2000})");
     CHECK(row.validate(good, "suspicion.json").empty());
 
-    const Json bad = parseOrThrow(R"({"act": "SNEAK", "weight": 2000})");
+    const Json bad                      = parseOrThrow(R"({"act": "SNEAK", "weight": 2000})");
     const std::vector<DataError> errors = row.validate(bad, "suspicion.json");
     REQUIRE(errors.size() == 1);
     CHECK(errors[0].jsonPointer == "/act");
@@ -324,26 +344,30 @@ TEST_CASE("TestDataSchema_EnumField_RejectsUnknownValueAndListsAllowed")
     REQUIRE(row.validate(notString, "suspicion.json").size() == 1);
 }
 
-TEST_CASE("TestDataSchema_ArrayElementErrors_CarryIndexPointers")
+TEST_CASE(
+    "TestDataSchema_ArrayElementErrors_CarryIndexPointers"
+)
 {
     using namespace harrowmere::data;
 
     Schema record;
     record.array("names", Schema::scalar(JsonType::String));
-    const Json broken = parseOrThrow(R"({"names": ["ana", "bo", 3, "dee"]})");
+    const Json broken                   = parseOrThrow(R"({"names": ["ana", "bo", 3, "dee"]})");
     const std::vector<DataError> errors = record.validate(broken, "names.json");
     REQUIRE(errors.size() == 1);
     CHECK(errors[0].jsonPointer == "/names/2");
     CHECK(errors[0].message.find("expected string") != std::string::npos);
 
     // The wrong container itself is reported at the field pointer.
-    const Json notArray = parseOrThrow(R"({"names": "ana"})");
+    const Json notArray                          = parseOrThrow(R"({"names": "ana"})");
     const std::vector<DataError> containerErrors = record.validate(notArray, "names.json");
     REQUIRE(containerErrors.size() == 1);
     CHECK(containerErrors[0].jsonPointer == "/names");
 }
 
-TEST_CASE("TestDataSchema_MapField_ValidatesKeysAndValues")
+TEST_CASE(
+    "TestDataSchema_MapField_ValidatesKeysAndValues"
+)
 {
     using namespace harrowmere::data;
 
@@ -351,23 +375,19 @@ TEST_CASE("TestDataSchema_MapField_ValidatesKeysAndValues")
     // this field's keys are the four doc stat names (enums.hpp, task 1.1,
     // closes the list; ENDURANCE/PERCEPTION are species-file additions).
     Schema species;
-    species.field("key", JsonType::String)
-        .map("statMultiplier", JsonType::Scaled, kStatNames);
+    species.field("key", JsonType::String).map("statMultiplier", JsonType::Scaled, kStatNames);
 
-    const Json good = parseOrThrow(
-        R"({"key": "beastkin", "statMultiplier": {"STRENGTH": 2.0, "INTELLIGENCE": 1.0}})");
+    const Json good = parseOrThrow(R"({"key": "beastkin", "statMultiplier": {"STRENGTH": 2.0, "INTELLIGENCE": 1.0}})");
     REQUIRE(species.validate(good, "species.json").empty());
     CHECK(scaledValue(good["statMultiplier"]["STRENGTH"]) == 20'000);
 
-    const Json unknownStat = parseOrThrow(
-        R"({"key": "elf", "statMultiplier": {"STRENGHT": 1.0}})"); // typo'd stat
+    const Json unknownStat = parseOrThrow(R"({"key": "elf", "statMultiplier": {"STRENGHT": 1.0}})"); // typo'd stat
     const std::vector<DataError> keyErrors = species.validate(unknownStat, "species.json");
     REQUIRE(keyErrors.size() == 1);
     CHECK(keyErrors[0].jsonPointer == "/statMultiplier/STRENGHT");
     CHECK(keyErrors[0].message.find("unknown map key") != std::string::npos);
 
-    const Json badValue = parseOrThrow(
-        R"({"key": "elf", "statMultiplier": {"ARCANA": true}})");
+    const Json badValue                      = parseOrThrow(R"({"key": "elf", "statMultiplier": {"ARCANA": true}})");
     const std::vector<DataError> valueErrors = species.validate(badValue, "species.json");
     REQUIRE(valueErrors.size() == 1);
     CHECK(valueErrors[0].jsonPointer == "/statMultiplier/ARCANA");
@@ -380,7 +400,9 @@ TEST_CASE("TestDataSchema_MapField_ValidatesKeysAndValues")
     CHECK(laws.validate(bias, "laws.json").empty());
 }
 
-TEST_CASE("TestDataSchema_RootArrayOfRecords_SuspicionShapeValidates")
+TEST_CASE(
+    "TestDataSchema_RootArrayOfRecords_SuspicionShapeValidates"
+)
 {
     using namespace harrowmere::data;
 
@@ -403,7 +425,7 @@ TEST_CASE("TestDataSchema_RootArrayOfRecords_SuspicionShapeValidates")
     ])");
     REQUIRE(suspicion.validate(pinnedRows, "suspicion.json").empty());
 
-    const Json brokenRow = parseOrThrow(R"([
+    const Json brokenRow                = parseOrThrow(R"([
         { "act": "CROUCH", "masks": ["SETTLEMENT", "MARKET"], "weight": 2000 },
         { "act": "FLEE",   "masks": ["SETTLEMENT"],           "weight": 3000, "extra": 1 }
     ])");
@@ -412,13 +434,15 @@ TEST_CASE("TestDataSchema_RootArrayOfRecords_SuspicionShapeValidates")
     CHECK(errors[0].jsonPointer == "/1/extra");
 
     // A non-array root is reported at the document pointer.
-    const Json notArray = parseOrThrow(R"({"act": "CROUCH"})");
+    const Json notArray                     = parseOrThrow(R"({"act": "CROUCH"})");
     const std::vector<DataError> rootErrors = suspicion.validate(notArray, "suspicion.json");
     REQUIRE(rootErrors.size() == 1);
     CHECK(rootErrors[0].jsonPointer.empty());
 }
 
-TEST_CASE("TestDataMerge_ScalarAndNull_ReplaceWholesale")
+TEST_CASE(
+    "TestDataMerge_ScalarAndNull_ReplaceWholesale"
+)
 {
     using namespace harrowmere::data;
 
@@ -440,7 +464,9 @@ TEST_CASE("TestDataMerge_ScalarAndNull_ReplaceWholesale")
     CHECK(objectOverArray["a"]["x"] == Json(5));
 }
 
-TEST_CASE("TestDataConfig_MissingKeysFallBackToPinnedDefaults")
+TEST_CASE(
+    "TestDataConfig_MissingKeysFallBackToPinnedDefaults"
+)
 {
     using namespace harrowmere::data;
 
@@ -449,11 +475,15 @@ TEST_CASE("TestDataConfig_MissingKeysFallBackToPinnedDefaults")
     class EmptySource final : public ConfigSource
     {
     public:
-        std::optional<std::int64_t> integer(const char *, const char *) const override
+        std::optional<std::int64_t> integer(
+            const char *, const char *
+        ) const override
         {
             return std::nullopt;
         }
-        std::optional<std::string> string(const char *, const char *) const override
+        std::optional<std::string> string(
+            const char *, const char *
+        ) const override
         {
             return std::nullopt;
         }
@@ -461,18 +491,20 @@ TEST_CASE("TestDataConfig_MissingKeysFallBackToPinnedDefaults")
 
     const EmptySource empty;
     const GameConfig config = GameConfig::load(empty);
-    CHECK(config.tickRate() == 10);            // D-TICK-1
-    CHECK(config.timeScale() == 60);           // D-TIME-1
-    CHECK(config.autosaveGameHours() == 6);    // task 0.1 config.toml
-    CHECK(config.seed() == 0);                 // 0 = random, persisted by 7.1
-    CHECK(config.modDirectory() == "mods");    // task 0.4 pinned fallback
+    CHECK(config.tickRate() == 10);         // D-TICK-1
+    CHECK(config.timeScale() == 60);        // D-TIME-1
+    CHECK(config.autosaveGameHours() == 6); // task 0.1 config.toml
+    CHECK(config.seed() == 0);              // 0 = random, persisted by 7.1
+    CHECK(config.modDirectory() == "mods"); // task 0.4 pinned fallback
 
     // Values present are read through the [harrowmere] / [engine] sections;
     // garbage (negative or oversized) falls back rather than reaching the sim.
     class StagedSource final : public ConfigSource
     {
     public:
-        std::optional<std::int64_t> integer(const char *section, const char *key) const override
+        std::optional<std::int64_t> integer(
+            const char *section, const char *key
+        ) const override
         {
             if (std::string(section) == "harrowmere" && std::string(key) == "tick_rate")
             {
@@ -488,7 +520,9 @@ TEST_CASE("TestDataConfig_MissingKeysFallBackToPinnedDefaults")
             }
             return std::nullopt;
         }
-        std::optional<std::string> string(const char *section, const char *key) const override
+        std::optional<std::string> string(
+            const char *section, const char *key
+        ) const override
         {
             if (std::string(section) == "engine" && std::string(key) == "mod_directory")
             {
@@ -506,7 +540,9 @@ TEST_CASE("TestDataConfig_MissingKeysFallBackToPinnedDefaults")
     CHECK(overridden.modDirectory() == "content_mods");
 }
 
-TEST_CASE("TestDataConfig_DeclaredKeyGate_AndDataDirectoryResolution")
+TEST_CASE(
+    "TestDataConfig_DeclaredKeyGate_AndDataDirectoryResolution"
+)
 {
     using namespace harrowmere::data;
 
@@ -523,13 +559,12 @@ TEST_CASE("TestDataConfig_DeclaredKeyGate_AndDataDirectoryResolution")
 
     // Base content directory: <exe_dir>/<mod_directory>/harrowmere_core/data
     // (task 0.4 pinned decision - the runtime layout puts packaged data there).
-    const GameConfig config =
-        GameConfig::withValues(10, 60, 6, 0, "mods");
-    CHECK(config.coreDataDirectory("/opt/harrowmere/runtime") ==
-          "/opt/harrowmere/runtime/mods/harrowmere_core/data");
+    const GameConfig config = GameConfig::withValues(10, 60, 6, 0, "mods");
+    CHECK(config.coreDataDirectory("/opt/harrowmere/runtime") == "/opt/harrowmere/runtime/mods/harrowmere_core/data");
 
-    const GameConfig relocated =
-        GameConfig::withValues(10, 60, 6, 0, "content_mods");
-    CHECK(relocated.coreDataDirectory("/opt/harrowmere/runtime") ==
-          "/opt/harrowmere/runtime/content_mods/harrowmere_core/data");
+    const GameConfig relocated = GameConfig::withValues(10, 60, 6, 0, "content_mods");
+    CHECK(
+        relocated.coreDataDirectory("/opt/harrowmere/runtime")
+        == "/opt/harrowmere/runtime/content_mods/harrowmere_core/data"
+    );
 }

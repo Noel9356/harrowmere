@@ -25,17 +25,22 @@ namespace harrowmere::data
 class EngineConfigSource final : public ConfigSource
 {
 public:
-    explicit EngineConfigSource(const engine::ConfigurationStore &store)
+    explicit EngineConfigSource(
+        const engine::ConfigurationStore &store
+    )
         : store_(store)
-    {
-    }
+    {}
 
-    std::optional<std::int64_t> integer(const char *section, const char *key) const override
+    std::optional<std::int64_t> integer(
+        const char *section, const char *key
+    ) const override
     {
         return store_.integerValue(section, key);
     }
 
-    std::optional<std::string> string(const char *section, const char *key) const override
+    std::optional<std::string> string(
+        const char *section, const char *key
+    ) const override
     {
         return store_.stringValue(section, key);
     }

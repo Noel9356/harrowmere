@@ -27,7 +27,8 @@
 
 #include <cstdint>
 
-namespace harrowmere::core {
+namespace harrowmere::core
+{
 
 // A-3: 86'400 game seconds per game day
 // ("a game-day is a real calendar day in game-time" — common.md Appendix A.1).
@@ -36,11 +37,12 @@ inline constexpr std::uint64_t DAY_LENGTH_SECONDS = 86'400;
 // WorldClock — value type; safe to copy. The carry accumulators are part of
 // the persisted state (task 7.1) so a save taken mid-tick-rate-change resumes
 // cleanly without skipping or duplicating a game-second.
-struct WorldClock {
-    std::uint64_t worldTime = 0;   // game seconds since world epoch (u64 per docs)
-    std::uint64_t realTime  = 0;   // real seconds since session start
-    std::uint32_t timeScale = 60;  // game seconds per real second (D-TIME-1)
-    std::uint32_t tickRate  = 10;  // sim ticks per real second  (D-TICK-1)
+struct WorldClock
+{
+    std::uint64_t worldTime = 0;  // game seconds since world epoch (u64 per docs)
+    std::uint64_t realTime  = 0;  // real seconds since session start
+    std::uint32_t timeScale = 60; // game seconds per real second (D-TIME-1)
+    std::uint32_t tickRate  = 10; // sim ticks per real second  (D-TICK-1)
 
     // Advance one tick on both clocks.
     //
@@ -60,7 +62,8 @@ struct WorldClock {
 
     // Current game-day index (worldTime / 86'400). Same value across the
     // whole day. Used by aging (task 3.4), reputation decay (4.4), seasons.
-    std::uint64_t gameDay() const noexcept {
+    std::uint64_t gameDay() const noexcept
+    {
         return worldTime / DAY_LENGTH_SECONDS;
     }
 
@@ -73,9 +76,9 @@ struct WorldClock {
     // Drives the sun direction (7.2P1 scene bridge) and the NIGHT suspicion
     // mask (4.5). Returns double per the spec — the value is recomputed each
     // call from worldTime; it is never stored, never accumulated.
-    double dayPhase01() const noexcept {
-        return static_cast<double>(worldTime % DAY_LENGTH_SECONDS)
-             / static_cast<double>(DAY_LENGTH_SECONDS);
+    double dayPhase01() const noexcept
+    {
+        return static_cast<double>(worldTime % DAY_LENGTH_SECONDS) / static_cast<double>(DAY_LENGTH_SECONDS);
     }
 
     // --- persisted carry state (task 7.1) ---
@@ -85,4 +88,4 @@ struct WorldClock {
     std::uint64_t realCarry  = 0;
 };
 
-}  // namespace harrowmere::core
+} // namespace harrowmere::core

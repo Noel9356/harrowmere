@@ -126,66 +126,80 @@
 // the engine_capability_logging INTERFACE target (task 0.1 links it).
 #include "logging_capability.hpp"
 
-namespace harrowmere::log {
+namespace harrowmere::log
+{
 
 // Severity ladder. The values double as preprocessor weights (see the level
 // macros at the bottom of this file) and are mapped onto engine::LogLevel in
 // detail::toEngineLevel().
-enum class Level : int {
+enum class Level : int
+{
     Trace = 0,
     Debug = 1,
     Info  = 2,
     Warn  = 3,
     Error = 4,
-    Off   = 5,  // sentinel: a floor of this value silences everything
+    Off   = 5, // sentinel: a floor of this value silences everything
 };
 
 // Pinned categories — task 0.5. CLOSED set: the macros accept only these
 // tokens (anything else fails to compile). Extending the set is a plan
 // change: deviation row first (common.md §1.4), then one new entry here.
-namespace cats {
-inline constexpr std::string_view sim     = "sim";      // ticks, scheduler, worldgen, seeds
-inline constexpr std::string_view combat  = "combat";   // combat resolution, deaths
-inline constexpr std::string_view npc     = "npc";      // needs, duties, aging, migration, LOD
-inline constexpr std::string_view economy = "economy";  // prices, production/consumption
-inline constexpr std::string_view events  = "events";   // event engine lifecycles
-inline constexpr std::string_view justice = "justice";  // evidence, cases, warrants, jail
-inline constexpr std::string_view world   = "world";    // regions, territories, seasons, weather
-inline constexpr std::string_view save    = "save";     // save/load, schema, autosave
-inline constexpr std::string_view ui      = "ui";       // view rebuilds, signals, panels
-}  // namespace cats
+namespace cats
+{
+inline constexpr std::string_view sim     = "sim";     // ticks, scheduler, worldgen, seeds
+inline constexpr std::string_view combat  = "combat";  // combat resolution, deaths
+inline constexpr std::string_view npc     = "npc";     // needs, duties, aging, migration, LOD
+inline constexpr std::string_view economy = "economy"; // prices, production/consumption
+inline constexpr std::string_view events  = "events";  // event engine lifecycles
+inline constexpr std::string_view justice = "justice"; // evidence, cases, warrants, jail
+inline constexpr std::string_view world   = "world";   // regions, territories, seasons, weather
+inline constexpr std::string_view save    = "save";    // save/load, schema, autosave
+inline constexpr std::string_view ui      = "ui";      // view rebuilds, signals, panels
+} // namespace cats
 
 // Composed-line bound ("[economy] " is the longest prefix, at 10 bytes).
 // Logging plumbing, not a game rule — no Appendix A row (see header doc).
 inline constexpr std::size_t LINE_BYTES = 512;
 
-static_assert(int(Level::Trace) == 0 && int(Level::Debug) == 1 &&
-              int(Level::Info)  == 2 && int(Level::Warn)  == 3 &&
-              int(Level::Error) == 4 && int(Level::Off)   == 5,
-              "level weights are part of the preprocessor contract below");
-static_assert(cats::sim.size()     <= 15 && cats::combat.size() <= 15 &&
-              cats::npc.size()     <= 15 && cats::economy.size() <= 15 &&
-              cats::events.size()  <= 15 && cats::justice.size() <= 15 &&
-              cats::world.size()   <= 15 && cats::save.size()    <= 15 &&
-              cats::ui.size()      <= 15,
-              "category names must fit the composed-line prefix budget");
+static_assert(
+    int(Level::Trace) == 0 && int(Level::Debug) == 1 && int(Level::Info) == 2 && int(Level::Warn) == 3
+        && int(Level::Error) == 4 && int(Level::Off) == 5,
+    "level weights are part of the preprocessor contract below"
+);
+static_assert(
+    cats::sim.size() <= 15 && cats::combat.size() <= 15 && cats::npc.size() <= 15 && cats::economy.size() <= 15
+        && cats::events.size() <= 15 && cats::justice.size() <= 15 && cats::world.size() <= 15
+        && cats::save.size() <= 15 && cats::ui.size() <= 15,
+    "category names must fit the composed-line prefix budget"
+);
 
 // --- sink handle + the single emit path --------------------------------------
-namespace detail {
+namespace detail
+{
 
 // Set once by install() from the plugin lifecycle (main thread, construct),
 // cleared by uninstall() (main thread, stop). Never touched from tick steps.
 inline engine::LoggerCapability *g_logger = nullptr;
 
-inline engine::LogLevel toEngineLevel(Level level) noexcept
+inline engine::LogLevel toEngineLevel(
+    Level level
+) noexcept
 {
-    switch (level) {
-        case Level::Trace: return engine::LogLevel::Trace;
-        case Level::Debug: return engine::LogLevel::Debug;
-        case Level::Info:  return engine::LogLevel::Information;
-        case Level::Warn:  return engine::LogLevel::Warning;
-        case Level::Error: return engine::LogLevel::Error;
-        case Level::Off:   break;  // never emitted; silenced here
+    switch (level)
+    {
+    case Level::Trace:
+        return engine::LogLevel::Trace;
+    case Level::Debug:
+        return engine::LogLevel::Debug;
+    case Level::Info:
+        return engine::LogLevel::Information;
+    case Level::Warn:
+        return engine::LogLevel::Warning;
+    case Level::Error:
+        return engine::LogLevel::Error;
+    case Level::Off:
+        break; // never emitted; silenced here
     }
     return engine::LogLevel::Information;
 }
@@ -194,10 +208,13 @@ inline engine::LogLevel toEngineLevel(Level level) noexcept
 // answers the identical question logMessage would answer, without paying the
 // formatting first. Returns false when no sink is installed (tests, pre-
 // install), so the null-sink case folds into the same early-out.
-inline bool wouldLogAt(Level level) noexcept
+inline bool wouldLogAt(
+    Level level
+) noexcept
 {
     engine::LoggerCapability *logger = g_logger;
-    if (logger == nullptr) return false;
+    if (logger == nullptr)
+        return false;
     return logger->wouldLog(toEngineLevel(level));
 }
 
@@ -205,18 +222,29 @@ inline bool wouldLogAt(Level level) noexcept
 // "[category] message": the category is a game-layer concept (pinned above),
 // so the wrapper owns it and the provider prints the finished line — exactly
 // how the plugin's own lifecycle logging behaves.
-inline void emit(Level level, const char *line) noexcept
+inline void emit(
+    Level level, const char *line
+) noexcept
 {
     engine::LoggerCapability *logger = g_logger;
-    if (logger == nullptr) return;  // belt and braces; wouldLogAt already gated
+    if (logger == nullptr)
+        return; // belt and braces; wouldLogAt already gated
     logger->logMessage(toEngineLevel(level), line);
 }
 
-}  // namespace detail
+} // namespace detail
 
 // --- lifecycle wiring (called ONLY from harrowmere_plugin.cpp) ---------------
-inline void install(engine::LoggerCapability *logger) noexcept { detail::g_logger = logger; }
-inline void uninstall() noexcept                               { detail::g_logger = nullptr; }
+inline void install(
+    engine::LoggerCapability *logger
+) noexcept
+{
+    detail::g_logger = logger;
+}
+inline void uninstall() noexcept
+{
+    detail::g_logger = nullptr;
+}
 
 // --- one-line writer ----------------------------------------------------------
 // printf-style formatting into a stack buffer, compile-checked on GCC/Clang
@@ -229,14 +257,17 @@ inline void uninstall() noexcept                               { detail::g_logge
 #endif
 
 HARROWMERE_LOG_PRINTF_FORMAT
-inline void write(Level level, std::string_view category, const char *fmt, ...) noexcept
+inline void write(
+    Level level, std::string_view category, const char *fmt, ...
+) noexcept
 {
-    if (!detail::wouldLogAt(level)) return;  // absent sink or provider floor
+    if (!detail::wouldLogAt(level))
+        return; // absent sink or provider floor
 
     // Compose "[category] message" in one stack buffer.
     char line[LINE_BYTES];
     std::size_t prefix = 0;
-    line[prefix++] = '[';
+    line[prefix++]     = '[';
     std::memcpy(line + prefix, category.data(), category.size());
     prefix += category.size();
     line[prefix++] = ']';
@@ -246,44 +277,48 @@ inline void write(Level level, std::string_view category, const char *fmt, ...) 
     va_start(args, fmt);
     const int written = std::vsnprintf(line + prefix, LINE_BYTES - prefix, fmt, args);
     va_end(args);
-    if (written < 0) return;  // encoding failure: drop the line, never throw
+    if (written < 0)
+        return; // encoding failure: drop the line, never throw
 
     std::size_t used = prefix + static_cast<std::size_t>(written);
-    if (used >= LINE_BYTES) {
+    if (used >= LINE_BYTES)
+    {
         // Truncated: vsnprintf already NUL-terminated at line[LINE_BYTES-1];
         // pin a "..." marker over the tail so the cut is visible.
-        used = LINE_BYTES - 1;
+        used                          = LINE_BYTES - 1;
         constexpr std::size_t kMarker = 3;
         std::memcpy(line + used - kMarker, "...", kMarker);
     }
 
     // Rule (1): one line — flatten anything that would split the record.
     for (std::size_t i = 0; i < used; ++i)
-        if (line[i] == '\n' || line[i] == '\r') line[i] = ' ';
+        if (line[i] == '\n' || line[i] == '\r')
+            line[i] = ' ';
 
     // line[used] is already '\0' (vsnprintf terminator, truncation path kept).
     detail::emit(level, line);
 }
 
-}  // namespace harrowmere::log
+} // namespace harrowmere::log
 
 // =============================================================================
 // Macros — the pinned public surface, defined after the namespace so every
 // call site is fully qualified and engine-agnostic.
 // =============================================================================
 
-#define HARROWMERE_LOG_WRITE(level_, category_, ...)                                 \
-    ::harrowmere::log::write(::harrowmere::log::Level::level_,                       \
-                             ::harrowmere::log::cats::category_, __VA_ARGS__)
+#define HARROWMERE_LOG_WRITE(level_, category_, ...)                                                                   \
+    ::harrowmere::log::write(::harrowmere::log::Level::level_, ::harrowmere::log::cats::category_, __VA_ARGS__)
 
 // A stripped call stays a real (type- and format-checked) call inside a
 // discarded branch: never evaluated, zero runtime cost, cannot rot. Flipping
 // `false` to `true` locally promotes it to its intended level.
-#define HARROWMERE_LOG_STRIPPED(level_, category_, ...)                              \
-    do {                                                                             \
-        if constexpr (false) {                                                       \
-            HARROWMERE_LOG_WRITE(level_, category_, __VA_ARGS__);                    \
-        }                                                                            \
+#define HARROWMERE_LOG_STRIPPED(level_, category_, ...)                                                                \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if constexpr (false)                                                                                           \
+        {                                                                                                              \
+            HARROWMERE_LOG_WRITE(level_, category_, __VA_ARGS__);                                                      \
+        }                                                                                                              \
     } while (0)
 
 // --- compile-time level switch (documented in the header doc block) ----------
@@ -312,51 +347,40 @@ inline void write(Level level, std::string_view category, const char *fmt, ...) 
 #define HARROWMERE_LOG_LEVEL HARROWMERE_LOG_LEVEL_INFO
 #endif
 
-#if HARROWMERE_LOG_LEVEL < HARROWMERE_LOG_LEVEL_TRACE ||                            \
-    HARROWMERE_LOG_LEVEL > HARROWMERE_LOG_LEVEL_OFF
+#if HARROWMERE_LOG_LEVEL < HARROWMERE_LOG_LEVEL_TRACE || HARROWMERE_LOG_LEVEL > HARROWMERE_LOG_LEVEL_OFF
 #error "HARROWMERE_LOG_LEVEL must be one of the HARROWMERE_LOG_LEVEL_* values (0-5)"
 #endif
 
 // --- the five pinned macros ---------------------------------------------------
 #if HARROWMERE_LOG_LEVEL <= HARROWMERE_LOG_LEVEL_ERROR
-#define HARROWMERE_LOG_ERROR(category_, ...)                                         \
-    HARROWMERE_LOG_WRITE(Error, category_, __VA_ARGS__)
+#define HARROWMERE_LOG_ERROR(category_, ...) HARROWMERE_LOG_WRITE(Error, category_, __VA_ARGS__)
 #else
-#define HARROWMERE_LOG_ERROR(category_, ...)                                         \
-    HARROWMERE_LOG_STRIPPED(Error, category_, __VA_ARGS__)
+#define HARROWMERE_LOG_ERROR(category_, ...) HARROWMERE_LOG_STRIPPED(Error, category_, __VA_ARGS__)
 #endif
 
 #if HARROWMERE_LOG_LEVEL <= HARROWMERE_LOG_LEVEL_WARN
-#define HARROWMERE_LOG_WARN(category_, ...)                                          \
-    HARROWMERE_LOG_WRITE(Warn, category_, __VA_ARGS__)
+#define HARROWMERE_LOG_WARN(category_, ...) HARROWMERE_LOG_WRITE(Warn, category_, __VA_ARGS__)
 #else
-#define HARROWMERE_LOG_WARN(category_, ...)                                          \
-    HARROWMERE_LOG_STRIPPED(Warn, category_, __VA_ARGS__)
+#define HARROWMERE_LOG_WARN(category_, ...) HARROWMERE_LOG_STRIPPED(Warn, category_, __VA_ARGS__)
 #endif
 
 #if HARROWMERE_LOG_LEVEL <= HARROWMERE_LOG_LEVEL_INFO
-#define HARROWMERE_LOG_INFO(category_, ...)                                          \
-    HARROWMERE_LOG_WRITE(Info, category_, __VA_ARGS__)
+#define HARROWMERE_LOG_INFO(category_, ...) HARROWMERE_LOG_WRITE(Info, category_, __VA_ARGS__)
 #else
-#define HARROWMERE_LOG_INFO(category_, ...)                                          \
-    HARROWMERE_LOG_STRIPPED(Info, category_, __VA_ARGS__)
+#define HARROWMERE_LOG_INFO(category_, ...) HARROWMERE_LOG_STRIPPED(Info, category_, __VA_ARGS__)
 #endif
 
 #if HARROWMERE_LOG_LEVEL <= HARROWMERE_LOG_LEVEL_DEBUG
-#define HARROWMERE_LOG_DEBUG(category_, ...)                                         \
-    HARROWMERE_LOG_WRITE(Debug, category_, __VA_ARGS__)
+#define HARROWMERE_LOG_DEBUG(category_, ...) HARROWMERE_LOG_WRITE(Debug, category_, __VA_ARGS__)
 #else
-#define HARROWMERE_LOG_DEBUG(category_, ...)                                         \
-    HARROWMERE_LOG_STRIPPED(Debug, category_, __VA_ARGS__)
+#define HARROWMERE_LOG_DEBUG(category_, ...) HARROWMERE_LOG_STRIPPED(Debug, category_, __VA_ARGS__)
 #endif
 
 // Rule (2): the ONLY legal level inside the per-tick steps (§4.4). It exists
 // in the binary solely when the build defines HARROWMERE_TRACE AND the floor
 // allows TRACE; otherwise it is the stripped no-op.
 #if defined(HARROWMERE_TRACE) && HARROWMERE_LOG_LEVEL <= HARROWMERE_LOG_LEVEL_TRACE
-#define HARROWMERE_LOG_TRACE(category_, ...)                                         \
-    HARROWMERE_LOG_WRITE(Trace, category_, __VA_ARGS__)
+#define HARROWMERE_LOG_TRACE(category_, ...) HARROWMERE_LOG_WRITE(Trace, category_, __VA_ARGS__)
 #else
-#define HARROWMERE_LOG_TRACE(category_, ...)                                         \
-    HARROWMERE_LOG_STRIPPED(Trace, category_, __VA_ARGS__)
+#define HARROWMERE_LOG_TRACE(category_, ...) HARROWMERE_LOG_STRIPPED(Trace, category_, __VA_ARGS__)
 #endif

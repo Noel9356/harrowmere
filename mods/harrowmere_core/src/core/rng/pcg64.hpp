@@ -29,7 +29,8 @@
 #include <cstdint>
 #include <type_traits>
 
-namespace harrowmere::core::rng {
+namespace harrowmere::core::rng
+{
 
 // pcg64 — 128-bit state, 64-bit output, XSL-RR.
 //
@@ -37,7 +38,8 @@ namespace harrowmere::core::rng {
 // tree's `.clang-format` + clangd conventions, see common.md §3.6), so the
 // 128-bit type is available. For other compilers a uint128_t shim would be
 // required; the spec's pinned toolchain makes that an out-of-scope concern.
-class pcg64 {
+class pcg64
+{
 public:
     using state_type  = __uint128_t;
     using stream_type = __uint128_t;
@@ -52,7 +54,10 @@ public:
     //   state_  = 0; step(); state_ += initstate; step();
     // Two steps before any output — this is the canonical PCG seeding recipe
     // and is what `seedAll` relies on for cross-run determinism.
-    pcg64(std::uint64_t initstate, std::uint64_t initseq) noexcept {
+    pcg64(
+        std::uint64_t initstate, std::uint64_t initseq
+    ) noexcept
+    {
         stream_ = (static_cast<stream_type>(initseq) << 1) | 1u;
         state_  = 0u;
         step();
@@ -61,21 +66,19 @@ public:
     }
 
     // Generate the next 64-bit output.
-    std::uint64_t next() noexcept {
+    std::uint64_t next() noexcept
+    {
         const state_type oldstate = state_;
         step();
         // XSL-RR output function (128-bit state -> 64-bit output):
         //   xorshifted = ((hi ^ lo) >> 32)
         //   rot        = oldstate >> 122   (top 6 bits — values 0..63)
         //   result     = rotr64(xorshifted, rot)
-        const std::uint64_t xorshifted =
-            static_cast<std::uint64_t>(((oldstate >> 64u) ^ oldstate) >> 32u);
-        const std::uint64_t rot =
-            static_cast<std::uint64_t>(oldstate >> 122u);
+        const std::uint64_t xorshifted = static_cast<std::uint64_t>(((oldstate >> 64u) ^ oldstate) >> 32u);
+        const std::uint64_t rot        = static_cast<std::uint64_t>(oldstate >> 122u);
         // 64-bit rotate-right by `rot` (rot ∈ [0, 63]). The (64 - rot) & 63
         // trick handles rot == 0 without invoking UB on a 64-bit shift.
-        const std::uint64_t result =
-            (xorshifted >> rot) | (xorshifted << ((64u - rot) & 63u));
+        const std::uint64_t result = (xorshifted >> rot) | (xorshifted << ((64u - rot) & 63u));
         return result;
     }
 
@@ -83,10 +86,21 @@ public:
     // state_ is the only thing that changes between draws; stream_ is fixed
     // at construction and is reproducible from (worldSeed, streamName) via
     // SeedRng::seedAll. Saves therefore persist state_ only (see SeedRng).
-    state_type state() const noexcept { return state_; }
-    void setState(state_type s) noexcept { state_ = s; }
+    state_type state() const noexcept
+    {
+        return state_;
+    }
+    void setState(
+        state_type s
+    ) noexcept
+    {
+        state_ = s;
+    }
 
-    stream_type stream() const noexcept { return stream_; }
+    stream_type stream() const noexcept
+    {
+        return stream_;
+    }
 
 private:
     // One LCG step:
@@ -94,21 +108,19 @@ private:
     // The 128-bit multiplier 0x2360_ED05_1FC6_5DA4_4385_DF64_9FCC_F645 is
     // O'Neill's recommended PCG-K64 constant. We split it into two 64-bit
     // halves because __uint128_t literals are not portable.
-    void step() noexcept {
+    void step() noexcept
+    {
         constexpr state_type kMultHi = 0x2360ED051FC65DA4ULL;
         constexpr state_type kMultLo = 0x4385DF649FCCF645ULL;
-        constexpr state_type kMult   =
-            (kMultHi << 64) | kMultLo;
-        state_ = state_ * kMult + stream_;
+        constexpr state_type kMult   = (kMultHi << 64) | kMultLo;
+        state_                       = state_ * kMult + stream_;
     }
 
-    state_type  state_  = 0;
+    state_type state_   = 0;
     stream_type stream_ = 0;
 };
 
-static_assert(std::is_standard_layout_v<pcg64>,
-              "pcg64 should be standard-layout for save/load byte-stability.");
-static_assert(sizeof(pcg64) == 32,
-              "pcg64 layout drift — saves (task 7.1) depend on the 32-byte size.");
+static_assert(std::is_standard_layout_v<pcg64>, "pcg64 should be standard-layout for save/load byte-stability.");
+static_assert(sizeof(pcg64) == 32, "pcg64 layout drift — saves (task 7.1) depend on the 32-byte size.");
 
-}  // namespace harrowmere::core::rng
+} // namespace harrowmere::core::rng

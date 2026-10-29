@@ -28,24 +28,27 @@
 #include <string_view>
 #include <vector>
 
-#include "core/constants.hpp"  // SCALE / kScale (Appendix A row A-1)
+#include "core/constants.hpp" // SCALE / kScale (Appendix A row A-1)
 #include "core/enums.hpp"
 
-namespace harrowmere::data {
+namespace harrowmere::data
+{
 
 // Mirrors roles.json's row shape. Field names match the JSON keys exactly.
-struct RoleData {
-    std::string  key;                       // unique string tag ("guard", "captain", ...)
+struct RoleData
+{
+    std::string key;                        // unique string tag ("guard", "captain", ...)
     std::uint32_t baseReportWeight = 0;     // 0..SCALE; ROLE_BASE_WEIGHT in witnessReports
     std::uint32_t integrityMin     = 0;     // 0..SCALE
     std::uint32_t integrityMax     = 0;     // 0..SCALE; lo <= hi
-    bool          critical          = false; // triggers onCriticalNpcDeath
-    std::uint32_t priority          = 0;     // tie-breaker for replacement selection
+    bool critical                  = false; // triggers onCriticalNpcDeath
+    std::uint32_t priority         = 0;     // tie-breaker for replacement selection
     std::vector<std::string> duties;        // role's duties ("patrol", "trade", ...)
-    bool          cannotTestify     = false; // child role: cannot give witness reports
+    bool cannotTestify = false;             // child role: cannot give witness reports
 };
 
-struct RoleDataError {
+struct RoleDataError
+{
     std::string file;
     std::string jsonPointer;
     std::string message;
@@ -55,13 +58,14 @@ struct RoleDataError {
 //
 // Lookups are by string key (roles.json's `key` field). Uses std::map for
 // deterministic iteration (R7).
-class RoleRegistry {
+class RoleRegistry
+{
 public:
     RoleRegistry() = default;
 
     bool has(std::string_view key) const noexcept;
-    const RoleData* byKey(std::string_view key) const noexcept;
-    RoleData*       byKey(std::string_view key)       noexcept;
+    const RoleData *byKey(std::string_view key) const noexcept;
+    RoleData *byKey(std::string_view key) noexcept;
 
     // True iff the registry contains every pinned v1 role (phase-1-walk.md
     // card 1.2's nine roles). The starter file ships all nine; mods may
@@ -69,13 +73,14 @@ public:
     bool hasPinnedV1Set() const noexcept;
 
     // Deterministic iteration (key-ascending, R7).
-    const std::map<std::string, RoleData>& roles() const noexcept { return roles_; }
+    const std::map<std::string, RoleData> &roles() const noexcept
+    {
+        return roles_;
+    }
 
 private:
     std::map<std::string, RoleData> roles_;
-    friend bool loadRoles(const std::string& path,
-                          RoleRegistry& out,
-                          std::vector<RoleDataError>& errors);
+    friend bool loadRoles(const std::string &path, RoleRegistry &out, std::vector<RoleDataError> &errors);
 };
 
 // Loads `roles.json` into `out`. The file MUST be a JSON array; every
@@ -88,8 +93,6 @@ private:
 //     in [0, SCALE].
 //   * `critical` is a boolean.
 //   * `key` is unique within the file.
-bool loadRoles(const std::string& path,
-               RoleRegistry& out,
-               std::vector<RoleDataError>& errors);
+bool loadRoles(const std::string &path, RoleRegistry &out, std::vector<RoleDataError> &errors);
 
 } // namespace harrowmere::data

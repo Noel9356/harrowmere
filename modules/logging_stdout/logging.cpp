@@ -87,9 +87,9 @@ LogLevel parseLevelName(
 LoggingModule::LoggingModule()
 {
     componentManifest = ComponentManifest{
-        .name                 = "logging",
-        .kind                 = ComponentKind::Module,
-        .version              = "0.1.0",
+        .name    = "logging",
+        .kind    = ComponentKind::Module,
+        .version = "0.1.0",
         // The implementation-bound member of the "logging" family: the console
         // (stdout) sink implementation. Consumers demand the family; a run that
         // needs THIS sink names the member exactly.

@@ -18,7 +18,7 @@ class UiHarrowmereCapability
 {
 public:
     static constexpr const char *capabilityName = "ui.harrowmere";
-    virtual ~UiHarrowmereCapability() = default;
+    virtual ~UiHarrowmereCapability()           = default;
 };
 
 } // namespace harrowmere

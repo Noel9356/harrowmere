@@ -46,50 +46,62 @@
 #include <string_view>
 #include <vector>
 
-#include "core/constants.hpp"  // SCALE / kScale (Appendix A row A-1)
+#include "core/constants.hpp" // SCALE / kScale (Appendix A row A-1)
 #include "core/enums.hpp"
 
-namespace harrowmere::data {
+namespace harrowmere::data
+{
 
 // Bit-set of suspicion-context masks. Mirror of the masks in
 // suspicion.json: SETTLEMENT, NIGHT, PRIVATE_PROPERTY, MARKET.
 // Bits are pinned — the design reference lists exactly four (extend by
 // deviation row only, common.md §1.4).
-enum class SuspicionMask : std::uint32_t {
+enum class SuspicionMask : std::uint32_t
+{
     NONE             = 0u,
     SETTLEMENT       = 1u << 0,
     NIGHT            = 1u << 1,
     PRIVATE_PROPERTY = 1u << 2,
-    MARKET            = 1u << 3,
+    MARKET           = 1u << 3,
 };
 
 // Bitwise operators for SuspicionMask — the data layer composes mask
 // sets via `SuspicionMask::SETTLEMENT | SuspicionMask::MARKET`. Enum
 // class does not provide these by default; defining them keeps the call
 // sites readable while staying type-safe.
-inline constexpr SuspicionMask operator|(SuspicionMask a, SuspicionMask b) noexcept {
-    return static_cast<SuspicionMask>(
-        static_cast<std::uint32_t>(a) | static_cast<std::uint32_t>(b));
+inline constexpr SuspicionMask operator|(
+    SuspicionMask a, SuspicionMask b
+) noexcept
+{
+    return static_cast<SuspicionMask>(static_cast<std::uint32_t>(a) | static_cast<std::uint32_t>(b));
 }
-inline constexpr SuspicionMask& operator|=(SuspicionMask& a, SuspicionMask b) noexcept {
+inline constexpr SuspicionMask &operator|=(
+    SuspicionMask &a, SuspicionMask b
+) noexcept
+{
     a = a | b;
     return a;
 }
-inline constexpr std::uint32_t toBits(SuspicionMask m) noexcept {
+inline constexpr std::uint32_t toBits(
+    SuspicionMask m
+) noexcept
+{
     return static_cast<std::uint32_t>(m);
 }
 
 // One row of the suspicion trigger table. Mirrors design reference
 // §Suspicion and Trust's `SuspicionTrigger` struct verbatim.
-struct SuspicionTrigger {
-    SuspicionAct   act   = SuspicionAct::CROUCH;
-    std::uint32_t  mask  = 0u;            // OR of SuspicionMask bits
-    std::uint32_t  weight = 0u;           // 0..SCALE
+struct SuspicionTrigger
+{
+    SuspicionAct act     = SuspicionAct::CROUCH;
+    std::uint32_t mask   = 0u; // OR of SuspicionMask bits
+    std::uint32_t weight = 0u; // 0..SCALE
 };
 
 // Errors share the same shape as CrimeDataError. When task 0.4 lands, the
 // canonical `DataError` replaces all three (file/jsonPointer/message).
-struct LawDataError {
+struct LawDataError
+{
     std::string file;
     std::string jsonPointer;
     std::string message;
@@ -111,32 +123,25 @@ struct LawDataError {
 // RPG "class" concept from classes.json. The docs themselves call this
 // field `clsid`; it is the social-class enum from design reference
 // §Territories.
-struct LawSet {
-    std::string key;   // e.g. "default", "xenophobic_village"
+struct LawSet
+{
+    std::string key; // e.g. "default", "xenophobic_village"
 
     // convictionThreshold[CrimeType] — report weight needed to convict.
     // Stored as an array indexed by CrimeType for O(1) lookup in caseScore;
     // populated from the JSON map (which the loader validates covers every
     // CrimeType). A value of 0 means "use CrimeData.defaultThreshold".
-    std::array<std::uint32_t,
-               static_cast<std::size_t>(CrimeType::COUNT)>
-        convictionThreshold{};
+    std::array<std::uint32_t, static_cast<std::size_t>(CrimeType::COUNT)> convictionThreshold{};
 
     // suppression[SocialClassId][CrimeType] = damping factor 0..SCALE.
     // Missing entry = SCALE (no damping). The default LawSet has an empty
     // map — every class damps at SCALE.
-    std::map<SocialClassId,
-             std::array<std::uint32_t,
-                        static_cast<std::size_t>(CrimeType::COUNT)>>
-        suppression;
+    std::map<SocialClassId, std::array<std::uint32_t, static_cast<std::size_t>(CrimeType::COUNT)>> suppression;
 
     // exemptions[speciesId][CrimeType] = true. Missing entry = false
     // (no exemption). Hard gate: recordCrime returns before constructing
     // an Evidence object.
-    std::map<std::uint16_t,
-             std::array<bool,
-                        static_cast<std::size_t>(CrimeType::COUNT)>>
-        exemptions;
+    std::map<std::uint16_t, std::array<bool, static_cast<std::size_t>(CrimeType::COUNT)>> exemptions;
 
     // cultureBias[speciesId] — signed. Feeds 3.9's affinity base.
     std::map<std::uint16_t, std::int32_t> cultureBias;
@@ -157,7 +162,8 @@ struct LawSet {
 //
 // LawSets are looked up by key string ("default", "tolerant_city", ...).
 // Uses std::map for deterministic iteration (R7).
-class LawSetRegistry {
+class LawSetRegistry
+{
 public:
     LawSetRegistry() = default;
 
@@ -166,17 +172,18 @@ public:
     bool hasDefaults() const noexcept;
 
     // O(log n) lookup by key. Returns nullptr if absent.
-    const LawSet* byKey(std::string_view key) const noexcept;
-    LawSet*       byKey(std::string_view key)       noexcept;
+    const LawSet *byKey(std::string_view key) const noexcept;
+    LawSet *byKey(std::string_view key) noexcept;
 
     // Deterministic iteration (key-ascending, R7).
-    const std::map<std::string, LawSet>& sets() const noexcept { return sets_; }
+    const std::map<std::string, LawSet> &sets() const noexcept
+    {
+        return sets_;
+    }
 
 private:
     std::map<std::string, LawSet> sets_;
-    friend bool loadLawSets(const std::string& path,
-                            LawSetRegistry& out,
-                            std::vector<LawDataError>& errors);
+    friend bool loadLawSets(const std::string &path, LawSetRegistry &out, std::vector<LawDataError> &errors);
 };
 
 // Loads `laws.json` into `out`. The file MUST be a JSON object with a
@@ -196,13 +203,11 @@ private:
 //   * Every suspicion act tag is one of the six pinned SuspicionAct
 //     values; every mask is one of the four pinned SuspicionMask names.
 //   * The file MUST contain at least the `default` set (DEFAULT_LAWS).
-bool loadLawSets(const std::string& path,
-                 LawSetRegistry& out,
-                 std::vector<LawDataError>& errors);
+bool loadLawSets(const std::string &path, LawSetRegistry &out, std::vector<LawDataError> &errors);
 
 // Convenience: parses a comma-or-array mask spec into a SuspicionMask
 // bit-set. Used by the loader; exported for tests + task 4.5.
-std::uint32_t parseSuspicionMasks(const std::vector<std::string>& tags);
+std::uint32_t parseSuspicionMasks(const std::vector<std::string> &tags);
 
 // Loads `suspicion.json` (the global SuspicionTrigger table) into `out`.
 // The file MUST be a JSON array of rows; every row's `act` MUST be one of
@@ -212,9 +217,9 @@ std::uint32_t parseSuspicionMasks(const std::vector<std::string>& tags);
 // The global table is the default for every territory whose LawSet has an
 // empty `suspicion` block; per-LawSet overrides (loaded inline by
 // loadLawSets) REPLACE the global table for that territory.
-bool loadSuspicionTriggers(const std::string& path,
-                           std::vector<SuspicionTrigger>& out,
-                           std::vector<LawDataError>& errors);
+bool loadSuspicionTriggers(
+    const std::string &path, std::vector<SuspicionTrigger> &out, std::vector<LawDataError> &errors
+);
 
 // Convenience: looks up `SocialClassId` from its string tag
 // ("NONE", "COMMONER", "NOBLE", "ROYAL").

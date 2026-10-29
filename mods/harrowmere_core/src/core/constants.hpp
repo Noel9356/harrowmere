@@ -19,7 +19,8 @@
 
 #include <cstdint>
 
-namespace harrowmere {
+namespace harrowmere
+{
 
 // A-1: SCALE = 10'000. The fixed-point grid. A probability of 0.37 is
 // stored as 3700; a multiplier of 1.5× is stored as 15000. Design rule:

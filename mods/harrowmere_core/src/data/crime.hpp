@@ -40,10 +40,11 @@
 #include <string_view>
 #include <vector>
 
-#include "core/constants.hpp"  // SCALE / kScale (Appendix A row A-1)
+#include "core/constants.hpp" // SCALE / kScale (Appendix A row A-1)
 #include "core/enums.hpp"
 
-namespace harrowmere::data {
+namespace harrowmere::data
+{
 
 // (SCALE = 10'000 lives in `harrowmere::SCALE` from core/constants.hpp.
 // `harrowmere::kScale` is its u32 alias used throughout the data layer.)
@@ -57,22 +58,24 @@ namespace harrowmere::data {
 //   * notorietyGain      — added on `convict()` (task 4.3); 0..SCALE.
 //   * defaultThreshold   — caseThreshold fallback when a LawSet does not
 //                          pin a per-crime threshold; 0..SCALE.
-struct CrimeData {
-    CrimeType        type             = CrimeType::MURDER;
-    bool             lethalForce      = false;
-    std::uint32_t    severity         = 0;   // 0..SCALE
-    std::uint32_t    notorietyGain    = 0;   // 0..SCALE
-    std::uint32_t    defaultThreshold = 0;   // 0..SCALE
+struct CrimeData
+{
+    CrimeType type                 = CrimeType::MURDER;
+    bool lethalForce               = false;
+    std::uint32_t severity         = 0; // 0..SCALE
+    std::uint32_t notorietyGain    = 0; // 0..SCALE
+    std::uint32_t defaultThreshold = 0; // 0..SCALE
 };
 
 // Validation error — file + JSON pointer + human message. Same shape as
 // task 0.4's `DataError`; reproduced here so the loader can construct one
 // without depending on task 0.4's full schema DSL. When task 0.4 lands,
 // this struct is replaced by the canonical one (the field set is identical).
-struct CrimeDataError {
-    std::string file;         // path to the JSON file being loaded
-    std::string jsonPointer;  // RFC-6901 JSON pointer into the offending value
-    std::string message;      // human-readable diagnostic
+struct CrimeDataError
+{
+    std::string file;        // path to the JSON file being loaded
+    std::string jsonPointer; // RFC-6901 JSON pointer into the offending value
+    std::string message;     // human-readable diagnostic
 };
 
 // Owned by task 1.2: the single source of truth for crime content.
@@ -81,10 +84,10 @@ struct CrimeDataError {
 // that backs a sized array ends in a `COUNT` sentinel exactly as the docs
 // do). Lookups are O(1) and branch-free — `caseScore` and `issueWarrant`
 // hot paths never iterate a map.
-class CrimeTable {
+class CrimeTable
+{
 public:
-    static constexpr std::size_t kSize =
-        static_cast<std::size_t>(CrimeType::COUNT);
+    static constexpr std::size_t kSize = static_cast<std::size_t>(CrimeType::COUNT);
 
     // Construct an empty table; rows are filled by `loadCrimeData`.
     CrimeTable() = default;
@@ -95,18 +98,19 @@ public:
     // O(1) lookup by CrimeType. Returns nullptr if the row is missing —
     // callers (caseScore, issueWarrant, convict) treat a missing row as a
     // hard invariant violation and assert / abort.
-    const CrimeData* row(CrimeType t) const noexcept;
-    CrimeData*       row(CrimeType t)       noexcept;
+    const CrimeData *row(CrimeType t) const noexcept;
+    CrimeData *row(CrimeType t) noexcept;
 
     // Iteration helpers (deterministic: CrimeType enum order, R7).
-    const std::array<CrimeData, kSize>& rows() const noexcept { return rows_; }
+    const std::array<CrimeData, kSize> &rows() const noexcept
+    {
+        return rows_;
+    }
 
 private:
     std::array<CrimeData, kSize> rows_{};
-    std::array<bool, kSize>      present_{};
-    friend bool loadCrimeData(const std::string& path,
-                              CrimeTable& out,
-                              std::vector<CrimeDataError>& errors);
+    std::array<bool, kSize> present_{};
+    friend bool loadCrimeData(const std::string &path, CrimeTable &out, std::vector<CrimeDataError> &errors);
 };
 
 // Loads `crime_data.json` into `out`. The file MUST contain exactly one row
@@ -125,9 +129,7 @@ private:
 //     "scaled and casted into integer" rule applies only to fields the
 //     schema marks scaled. crime_data.json has no scaled fields — every
 //     number is an integer on the SCALE grid.
-bool loadCrimeData(const std::string& path,
-                   CrimeTable& out,
-                   std::vector<CrimeDataError>& errors);
+bool loadCrimeData(const std::string &path, CrimeTable &out, std::vector<CrimeDataError> &errors);
 
 // Convenience: looks up `CrimeType` from its string tag (e.g. "MURDER").
 // Returns std::nullopt for unknown tags — used by worldgen (task 1.5) to

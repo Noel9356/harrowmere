@@ -327,8 +327,8 @@ SceneCapability::ObjectHandle SceneModule::addObject(
     }
     const ObjectHandle handle = nextHandle++;
     RegistryEntry entry;
-    entry.handle = handle;
-    entry.object = object;
+    entry.handle          = handle;
+    entry.object          = object;
     RegistryEntry &stored = registry.emplace(handle, std::move(entry)).first->second;
     // The handle's slot: one chunk acquisition when the handle enters a
     // chunk range with no storage yet (the recycle list makes that a
@@ -381,8 +381,7 @@ bool SceneModule::removeObject(
     {
         logger->logMessage(
             LogLevel::Debug,
-            "scene module: object " + std::to_string(handle) + " removed (" + std::to_string(registry.size())
-                + " live)"
+            "scene module: object " + std::to_string(handle) + " removed (" + std::to_string(registry.size()) + " live)"
         );
     }
     if (removedChannel != nullptr)
@@ -795,7 +794,7 @@ void SceneModule::releaseHandleChunk(
     std::size_t chunkIndex
 )
 {
-    HandleChunk *chunk = handleChunks[chunkIndex];
+    HandleChunk *chunk       = handleChunks[chunkIndex];
     handleChunks[chunkIndex] = nullptr;
     if (chunkIndex == handleChunks.size() - 1)
     {

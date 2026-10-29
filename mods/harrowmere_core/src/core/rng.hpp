@@ -42,14 +42,16 @@
 
 #include "rng/pcg64.hpp"
 
-namespace harrowmere::core {
+namespace harrowmere::core
+{
 
 // SCALE = 10'000 — common.md §3.2, Appendix A row A-1.
 // Re-declared here (as RNG_SCALE) so rng.hpp does not depend on math.hpp
 // (avoids a header cycle: math.hpp's tests will later need SeedRng).
 inline constexpr std::uint64_t RNG_SCALE = 10'000;
 
-class SeedRng {
+class SeedRng
+{
 public:
     // Initialize all pinned streams deterministically from `worldSeed`.
     // Idempotent: calling again resets every stream to the same state.
@@ -60,7 +62,7 @@ public:
     // Unknown stream name: programmer error (the pinned list is closed) —
     // debug-asserts and returns 0 in release (the deterministic-recovery
     // pattern from common.md §3.4; never throws).
-    std::uint64_t draw(const char* stream);
+    std::uint64_t draw(const char *stream);
 
     // Uniform integer in [lo, hiExcl). Requires hiExcl > lo.
     //
@@ -72,11 +74,14 @@ public:
     //
     // R2 guard: if hiExcl <= lo, debug-asserts and returns lo (no division
     // by zero when span == 0).
-    std::uint32_t range(const char* stream, std::uint32_t lo, std::uint32_t hiExcl);
+    std::uint32_t range(const char *stream, std::uint32_t lo, std::uint32_t hiExcl);
 
     // Convenience for probabilities on the SCALE grid: returns [0, RNG_SCALE).
     // Equivalent to range(stream, 0, 10'000).
-    std::uint32_t pct(const char* stream) {
+    std::uint32_t pct(
+        const char *stream
+    )
+    {
         return range(stream, 0, static_cast<std::uint32_t>(RNG_SCALE));
     }
 
@@ -95,7 +100,7 @@ public:
     // produced the snapshot (so the stream selectors match). Streams missing
     // from the snapshot are left at their post-seedAll state — the caller
     // is expected to snapshot all streams via state().
-    void loadState(const std::vector<std::pair<std::string, std::uint64_t>>& s);
+    void loadState(const std::vector<std::pair<std::string, std::uint64_t>> &s);
 
 private:
     // std::map (not unordered_map): R7 — anything whose iteration order
@@ -105,4 +110,4 @@ private:
     std::map<std::string, rng::pcg64> streams_;
 };
 
-}  // namespace harrowmere::core
+} // namespace harrowmere::core

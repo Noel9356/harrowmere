@@ -49,7 +49,7 @@ public:
     virtual ~ConfigSource() = default;
 
     virtual std::optional<std::int64_t> integer(const char *section, const char *key) const = 0;
-    virtual std::optional<std::string> string(const char *section, const char *key) const = 0;
+    virtual std::optional<std::string> string(const char *section, const char *key) const   = 0;
 };
 
 // The wrapped values. Constructed by load() from a ConfigSource, or directly
@@ -65,9 +65,13 @@ public:
     static GameConfig load(const ConfigSource &source);
 
     // Direct construction (tests; the shape later tasks cache).
-    static GameConfig withValues(std::uint32_t tickRate, std::uint32_t timeScale,
-                                 std::uint32_t autosaveGameHours, std::uint64_t seed,
-                                 std::string modDirectory);
+    static GameConfig withValues(
+        std::uint32_t tickRate,
+        std::uint32_t timeScale,
+        std::uint32_t autosaveGameHours,
+        std::uint64_t seed,
+        std::string modDirectory
+    );
 
     // Sim ticks per real second - the fixed-update heartbeat (D-TICK-1,
     // common.md §4.4; default 10 from config.toml, task 0.1).
@@ -97,8 +101,13 @@ public:
     std::string coreDataDirectory(std::string_view executableDir) const;
 
 private:
-    GameConfig(std::uint32_t tickRate, std::uint32_t timeScale,
-               std::uint32_t autosaveGameHours, std::uint64_t seed, std::string modDirectory);
+    GameConfig(
+        std::uint32_t tickRate,
+        std::uint32_t timeScale,
+        std::uint32_t autosaveGameHours,
+        std::uint64_t seed,
+        std::string modDirectory
+    );
 
     std::uint32_t tickRate_;
     std::uint32_t timeScale_;

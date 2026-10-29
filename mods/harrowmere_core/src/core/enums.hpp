@@ -31,15 +31,17 @@
 // ============================================================================
 #pragma once
 
-#include <cstdint>   // std::uint32_t
+#include <cstdint> // std::uint32_t
 
-namespace harrowmere {
+namespace harrowmere
+{
 
 // StatusType — bit flags (D-CHAR-1, task 2.1). The enum exists for hasStatus;
 // the actual values are *derived* at runtime from event/combat/war/jail state
 // and never stored on Character.statusFlags (which holds non-derived flags
 // only). See phase-1-walk.md card 2.1 / common.md D-CHAR-1.
-enum class StatusType : std::uint32_t {
+enum class StatusType : std::uint32_t
+{
     IN_COMBAT = 1u << 0,
     IN_EVENT  = 1u << 1,
     IN_WAR    = 1u << 2,
@@ -47,7 +49,8 @@ enum class StatusType : std::uint32_t {
     // And more — extend only via deviation row (§1.4)
 };
 
-enum class CooldownType {
+enum class CooldownType
+{
     APPEARANCE,
     RESPEC_STAT,
     RESPEC_SKILL,
@@ -55,7 +58,8 @@ enum class CooldownType {
     COUNT
 };
 
-enum class StatType {
+enum class StatType
+{
     STRENGTH,
     DEFENCE,
     AGILITY,
@@ -65,7 +69,8 @@ enum class StatType {
     COUNT
 };
 
-enum class SkillType {
+enum class SkillType
+{
     MELEE,
     ARCHERY,
     STEALTH,
@@ -77,7 +82,8 @@ enum class SkillType {
     COUNT
 };
 
-enum class CrimeType {
+enum class CrimeType
+{
     MURDER,
     ASSAULT,
     THEFT,
@@ -89,14 +95,16 @@ enum class CrimeType {
     COUNT
 };
 
-enum class ActionType {
+enum class ActionType
+{
     DAMAGE,
     HEALING,
     OBJECTIVE,
     COUNT
 };
 
-enum class TerritoryType {
+enum class TerritoryType
+{
     VILLAGE,
     CITY,
     KINGDOM,
@@ -104,7 +112,8 @@ enum class TerritoryType {
     COUNT
 };
 
-enum class SocialClassId {
+enum class SocialClassId
+{
     NONE,
     COMMONER,
     NOBLE,
@@ -114,7 +123,8 @@ enum class SocialClassId {
 
 // EvidenceStatus has no COUNT sentinel — it is never used as an array bound.
 // Pinned by justice.md / common.md task 4.x.
-enum class EvidenceStatus {
+enum class EvidenceStatus
+{
     UNKNOWN,
     INVESTIGATING,
     WANTED,
@@ -122,7 +132,8 @@ enum class EvidenceStatus {
     ARCHIVED
 };
 
-enum class TrustTier {
+enum class TrustTier
+{
     STRANGER,
     WATCHED,
     DISTRUSTED,
@@ -132,7 +143,8 @@ enum class TrustTier {
 // SuspicionAct — pinned list of suspicion trigger acts (design reference
 // §Suspicion and Trust; suspicion.json's `act` field is one of these).
 // No COUNT sentinel — the list is closed but not array-indexed.
-enum class SuspicionAct {
+enum class SuspicionAct
+{
     CROUCH,
     UNLIT,
     MASKED,

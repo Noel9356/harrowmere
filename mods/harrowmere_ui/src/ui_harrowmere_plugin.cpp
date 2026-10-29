@@ -37,19 +37,20 @@ public:
     // (the sim capability, input, the renderer overlay seam) are all resolved
     // and started before this construct runs - the graph orders them - so
     // Phase 1's later tasks can start registering surfaces here.
-    void construct(engine::ComponentContext &) override
-    {
-    }
+    void construct(
+        engine::ComponentContext &
+    ) override
+    {}
 
     void start() override
-    {
-    }
+    {}
 
     void stop() override
-    {
-    }
+    {}
 
-    void *capabilityPointerFor(const std::string &capabilityName) override
+    void *capabilityPointerFor(
+        const std::string &capabilityName
+    ) override
     {
         if (capabilityName == harrowmere::UiHarrowmereCapability::capabilityName)
         {
@@ -68,7 +69,9 @@ engine::ModInterface *createHarrowmereUiMod()
     return new HarrowmereUiMod();
 }
 
-void destroyHarrowmereUiMod(engine::ModInterface *mod)
+void destroyHarrowmereUiMod(
+    engine::ModInterface *mod
+)
 {
     delete mod;
 }

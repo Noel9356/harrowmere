@@ -33,31 +33,25 @@ namespace harrowmere
 // whitelist.
 
 struct WorldView
-{
-}; // regions, territories, laws-at, safe zones, season/weather (Phase 2)
+{}; // regions, territories, laws-at, safe zones, season/weather (Phase 2)
 
 struct CharactersView
-{
-}; // presence, species, role, power, status, needs-as-visible (Phase 2)
+{}; // presence, species, role, power, status, needs-as-visible (Phase 2)
 
 struct PlayerView
-{
-}; // the local player's full state (Phase 2)
+{}; // the local player's full state (Phase 2)
 
 struct JusticeView
-{
-}; // reputation, notoriety, warrants against you, jail status (Phase 2)
+{}; // reputation, notoriety, warrants against you, jail status (Phase 2)
 
 struct EventsView
-{
-}; // joinable/active events, own contribution (Phase 2)
+{}; // joinable/active events, own contribution (Phase 2)
 
 // The UI-visible signal queue (§4.2): rejection reasons and world notices
 // surface back through these, never through exceptions. Task 0.7 pins the
 // event-side PlayerSignal struct; the capability-side queue lives here.
 struct UiSignals
-{
-};
+{};
 
 // ---- write path (v0.1 stub) --------------------------------------------------
 //
@@ -67,8 +61,7 @@ struct UiSignals
 // carries an empty vocabulary so the seam compiles.
 
 struct SimCommand
-{
-};
+{};
 
 // Capability "harrowmere": the game's authoritative simulation. Consumers
 // acquire through the family name; the descriptor declares the
@@ -79,15 +72,15 @@ class SimCapability
 {
 public:
     static constexpr const char *capabilityName = "harrowmere.core";
-    virtual ~SimCapability() = default;
+    virtual ~SimCapability()                    = default;
 
     // ---- reads: stable, cheap view snapshots (rebuilt at step 13 each frame) ----
-    virtual const WorldView &world() const;      // regions, territories, laws-at, safe zones, season/weather
+    virtual const WorldView &world() const;           // regions, territories, laws-at, safe zones, season/weather
     virtual const CharactersView &characters() const; // presence, species, role, power, status, needs (as visible)
-    virtual const PlayerView &player() const;    // the local player's full state
-    virtual const JusticeView &justice() const;  // reputation, notoriety, warrants against you, jail status
-    virtual const EventsView &events() const;    // joinable/active events, own contribution
-    virtual const UiSignals &signals() const;    // PlayerSignals queue (investigated / wanted / poster / greeting)
+    virtual const PlayerView &player() const;         // the local player's full state
+    virtual const JusticeView &justice() const;       // reputation, notoriety, warrants against you, jail status
+    virtual const EventsView &events() const;         // joinable/active events, own contribution
+    virtual const UiSignals &signals() const;         // PlayerSignals queue (investigated / wanted / poster / greeting)
 
     // ---- writes: commands, never direct state mutation ----
     // Queued; applied at step 9 next tick (§4.4) or rejected with a logged
@@ -137,7 +130,9 @@ inline const UiSignals &SimCapability::signals() const
     return signals_;
 }
 
-inline void SimCapability::submit(SimCommand)
+inline void SimCapability::submit(
+    SimCommand
+)
 {
     // v0.1: no command vocabulary exists yet; nothing to queue. Phase 2 fills
     // the queue here and tick step 9 drains it (§4.4).

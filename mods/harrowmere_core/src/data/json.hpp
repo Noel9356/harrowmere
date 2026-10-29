@@ -64,16 +64,19 @@ struct DataError
 //     template <typename T, typename E> using Result = harrowmere::Result<T, E>;
 // (one line - DEVIATIONS.md tracks it); if it is not, the handful of call
 // sites in json.cpp adapt mechanically.
-template <typename T, typename E>
-class Result
+template <typename T, typename E> class Result
 {
 public:
-    static Result ok(T value)
+    static Result ok(
+        T value
+    )
     {
         return Result(std::in_place_index<0>, std::move(value));
     }
 
-    static Result err(E error)
+    static Result err(
+        E error
+    )
     {
         return Result(std::in_place_index<1>, std::move(error));
     }
@@ -105,10 +108,11 @@ public:
 
 private:
     template <std::size_t I, typename V>
-    Result(std::in_place_index_t<I> where, V &&v)
+    Result(
+        std::in_place_index_t<I> where, V &&v
+    )
         : storage_(where, std::forward<V>(v))
-    {
-    }
+    {}
 
     std::variant<T, E> storage_;
 };

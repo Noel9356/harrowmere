@@ -17,21 +17,29 @@
 #include <cassert>
 #include <cstdint>
 
-#include "constants.hpp"  // SCALE (A-1) — the one definition; never redefine it here
+#include "constants.hpp" // SCALE (A-1) — the one definition; never redefine it here
 
 // Exact integer square root (floor), no floating point. Pitfall (task 0.2): sqrtl
 // breaks determinism/precision at huge inputs — this is the exact bit-by-bit binary
 // method, correct for every u64 input. constexpr, so compile-time tables can use it.
-constexpr std::uint64_t isqrt64(std::uint64_t v) noexcept {
-    if (v == 0) return 0;
+constexpr std::uint64_t isqrt64(
+    std::uint64_t v
+) noexcept
+{
+    if (v == 0)
+        return 0;
     std::uint64_t res = 0;
-    std::uint64_t bit = 1ULL << 62;  // highest power of four within u64
-    while (bit > v) bit >>= 2;
-    while (bit != 0) {
-        if (v >= res + bit) {
+    std::uint64_t bit = 1ULL << 62; // highest power of four within u64
+    while (bit > v)
+        bit >>= 2;
+    while (bit != 0)
+    {
+        if (v >= res + bit)
+        {
             v -= res + bit;
             res = (res >> 1) + bit;
-        } else {
+        } else
+        {
             res >>= 1;
         }
         bit >>= 2;
@@ -41,10 +49,15 @@ constexpr std::uint64_t isqrt64(std::uint64_t v) noexcept {
 
 // Clamp into [lo, hi]; asserts lo <= hi in debug (task 0.2 spec).
 template <class T>
-constexpr T clampScalar(T v, T lo, T hi) {
+constexpr T clampScalar(
+    T v, T lo, T hi
+)
+{
     assert(lo <= hi);
-    if (v < lo) return lo;
-    if (v > hi) return hi;
+    if (v < lo)
+        return lo;
+    if (v > hi)
+        return hi;
     return v;
 }
 

@@ -35,11 +35,11 @@ constexpr double kInt64MagnitudeLimit = 9.223372036854775808e18;
 class StrictDomBuilder
 {
 public:
-    using number_integer_t = Json::number_integer_t;
+    using number_integer_t  = Json::number_integer_t;
     using number_unsigned_t = Json::number_unsigned_t;
-    using number_float_t = Json::number_float_t;
-    using string_t = Json::string_t;
-    using binary_t = Json::binary_t;
+    using number_float_t    = Json::number_float_t;
+    using string_t          = Json::string_t;
+    using binary_t          = Json::binary_t;
 
     // ---- value events -------------------------------------------------------
     bool null()
@@ -47,32 +47,44 @@ public:
         return attach(Json(nullptr));
     }
 
-    bool boolean(bool value)
+    bool boolean(
+        bool value
+    )
     {
         return attach(Json(value));
     }
 
-    bool number_integer(number_integer_t value)
+    bool number_integer(
+        number_integer_t value
+    )
     {
         return attach(Json(value));
     }
 
-    bool number_unsigned(number_unsigned_t value)
+    bool number_unsigned(
+        number_unsigned_t value
+    )
     {
         return attach(Json(value));
     }
 
-    bool number_float(number_float_t value, const string_t & /*raw*/)
+    bool number_float(
+        number_float_t value, const string_t & /*raw*/
+    )
     {
         return attach(Json(value));
     }
 
-    bool string(string_t &value)
+    bool string(
+        string_t &value
+    )
     {
         return attach(Json(value));
     }
 
-    bool binary(binary_t & /*value*/)
+    bool binary(
+        binary_t & /*value*/
+    )
     {
         // JSON text never produces binary values (only the binary input
         // formats do); arriving here means the bytes were not JSON content.
@@ -80,26 +92,30 @@ public:
     }
 
     // ---- container events ---------------------------------------------------
-    bool start_object(std::size_t /*elementCount*/)
+    bool start_object(
+        std::size_t /*elementCount*/
+    )
     {
         if (stack_.size() >= kMaxNestingDepth)
         {
-            return fail(currentPointer(),
-                        "nesting deeper than the parser depth cap (200)");
+            return fail(currentPointer(), "nesting deeper than the parser depth cap (200)");
         }
         stack_.push_back(Frame{Json::object(), std::set<std::string>{}, childPointer(), std::string{}});
         return true;
     }
 
-    bool key(string_t &key)
+    bool key(
+        string_t &key
+    )
     {
         // A key event only fires inside an open object frame.
         Frame &frame = stack_.back();
         if (frame.seenKeys.count(key) != 0)
         {
-            return fail(frame.pointer + "/" + pointerEscape(key),
-                        "duplicate object key '" + key +
-                            "' (strict loader: last-wins overwriting is not allowed)");
+            return fail(
+                frame.pointer + "/" + pointerEscape(key),
+                "duplicate object key '" + key + "' (strict loader: last-wins overwriting is not allowed)"
+            );
         }
         frame.seenKeys.insert(key);
         frame.currentKey = std::move(key);
@@ -113,12 +129,13 @@ public:
         return attach(std::move(done));
     }
 
-    bool start_array(std::size_t /*elementCount*/)
+    bool start_array(
+        std::size_t /*elementCount*/
+    )
     {
         if (stack_.size() >= kMaxNestingDepth)
         {
-            return fail(currentPointer(),
-                        "nesting deeper than the parser depth cap (200)");
+            return fail(currentPointer(), "nesting deeper than the parser depth cap (200)");
         }
         stack_.push_back(Frame{Json::array(), std::set<std::string>{}, childPointer(), std::string{}});
         return true;
@@ -132,11 +149,11 @@ public:
     }
 
     // ---- failure plumbing ---------------------------------------------------
-    bool parse_error(std::size_t position, const std::string & /*lastToken*/,
-                     const Json::exception &ex)
+    bool parse_error(
+        std::size_t position, const std::string & /*lastToken*/, const Json::exception &ex
+    )
     {
-        return fail(currentPointer(),
-                    "parse error at byte " + std::to_string(position) + ": " + ex.what());
+        return fail(currentPointer(), "parse error at byte " + std::to_string(position) + ": " + ex.what());
     }
 
     // ---- results ------------------------------------------------------------
@@ -185,7 +202,9 @@ private:
         return stack_.empty() ? std::string{} : stack_.back().pointer;
     }
 
-    bool attach(Json value)
+    bool attach(
+        Json value
+    )
     {
         if (stack_.empty())
         {
@@ -196,18 +215,19 @@ private:
         if (top.value.is_object())
         {
             top.value[top.currentKey] = std::move(value);
-        }
-        else
+        } else
         {
             top.value.push_back(std::move(value));
         }
         return true;
     }
 
-    bool fail(const std::string &jsonPointer, std::string message)
+    bool fail(
+        const std::string &jsonPointer, std::string message
+    )
     {
         failed_ = true;
-        error_ = DataError{std::string{}, jsonPointer, std::move(message)};
+        error_  = DataError{std::string{}, jsonPointer, std::move(message)};
         return false;
     }
 
@@ -232,11 +252,13 @@ std::string DataError::toString() const
     return out;
 }
 
-std::size_t utf8ErrorOffset(std::string_view text)
+std::size_t utf8ErrorOffset(
+    std::string_view text
+)
 {
-    const auto *bytes = reinterpret_cast<const unsigned char *>(text.data());
+    const auto *bytes      = reinterpret_cast<const unsigned char *>(text.data());
     const std::size_t size = text.size();
-    std::size_t i = 0;
+    std::size_t i          = 0;
     while (i < size)
     {
         const unsigned char lead = bytes[i];
@@ -247,41 +269,34 @@ std::size_t utf8ErrorOffset(std::string_view text)
         }
 
         std::size_t continuations = 0;
-        unsigned char firstLow = 0x80; // inclusive range of the FIRST continuation
-        unsigned char firstHigh = 0xBF;
+        unsigned char firstLow    = 0x80; // inclusive range of the FIRST continuation
+        unsigned char firstHigh   = 0xBF;
         if (lead >= 0xC2 && lead <= 0xDF)
         {
             continuations = 1; // 2-byte; 0xC0/0xC1 would be overlong, excluded
-        }
-        else if (lead == 0xE0)
+        } else if (lead == 0xE0)
         {
             continuations = 2;
-            firstLow = 0xA0; // no overlong 3-byte
-        }
-        else if ((lead >= 0xE1 && lead <= 0xEC) || lead == 0xEE || lead == 0xEF)
+            firstLow      = 0xA0; // no overlong 3-byte
+        } else if ((lead >= 0xE1 && lead <= 0xEC) || lead == 0xEE || lead == 0xEF)
         {
             continuations = 2;
-        }
-        else if (lead == 0xED)
+        } else if (lead == 0xED)
         {
             continuations = 2;
-            firstHigh = 0x9F; // no surrogates (U+D800..U+DFFF)
-        }
-        else if (lead == 0xF0)
+            firstHigh     = 0x9F; // no surrogates (U+D800..U+DFFF)
+        } else if (lead == 0xF0)
         {
             continuations = 3;
-            firstLow = 0x90; // no overlong 4-byte
-        }
-        else if (lead >= 0xF1 && lead <= 0xF3)
+            firstLow      = 0x90; // no overlong 4-byte
+        } else if (lead >= 0xF1 && lead <= 0xF3)
         {
             continuations = 3;
-        }
-        else if (lead == 0xF4)
+        } else if (lead == 0xF4)
         {
             continuations = 3;
-            firstHigh = 0x8F; // nothing above U+10FFFF
-        }
-        else
+            firstHigh     = 0x8F; // nothing above U+10FFFF
+        } else
         {
             return i; // 0x80..0xC1 (lone continuation / overlong) and 0xF5..0xFF
         }
@@ -308,24 +323,26 @@ std::size_t utf8ErrorOffset(std::string_view text)
     return static_cast<std::size_t>(std::string_view::npos);
 }
 
-Result<Json, DataError> parseJsonText(std::string_view text, const std::string &fileLabel)
+Result<Json, DataError> parseJsonText(
+    std::string_view text, const std::string &fileLabel
+)
 {
     // 1. UTF-8 first - the friendliest error a broken file can produce.
     const std::size_t badByte = utf8ErrorOffset(text);
     if (badByte != std::string_view::npos)
     {
-        return Result<Json, DataError>::err(DataError{
-            fileLabel, "",
-            "file is not valid UTF-8 (first invalid byte at offset " + std::to_string(badByte) + ")"});
+        return Result<Json, DataError>::err(
+            DataError{
+                fileLabel, "", "file is not valid UTF-8 (first invalid byte at offset " + std::to_string(badByte) + ")"
+            }
+        );
     }
 
     // 2. Tolerate (and skip) a single leading UTF-8 BOM: some editors add one
     //    and rejecting whole files over it helps nobody.
     std::string bytes(text);
-    if (bytes.size() >= 3 &&
-        static_cast<unsigned char>(bytes[0]) == 0xEF &&
-        static_cast<unsigned char>(bytes[1]) == 0xBB &&
-        static_cast<unsigned char>(bytes[2]) == 0xBF)
+    if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xEF
+        && static_cast<unsigned char>(bytes[1]) == 0xBB && static_cast<unsigned char>(bytes[2]) == 0xBF)
     {
         bytes.erase(0, 3);
     }
@@ -336,16 +353,17 @@ Result<Json, DataError> parseJsonText(std::string_view text, const std::string &
     StrictDomBuilder builder;
     if (!Json::sax_parse(bytes, &builder))
     {
-        DataError error = builder.failed()
-                              ? builder.error()
-                              : DataError{std::string{}, std::string{}, "unspecified parse failure"};
+        DataError error
+            = builder.failed() ? builder.error() : DataError{std::string{}, std::string{}, "unspecified parse failure"};
         error.file = fileLabel;
         return Result<Json, DataError>::err(std::move(error));
     }
     return Result<Json, DataError>::ok(builder.takeDom());
 }
 
-Result<Json, DataError> loadJsonFile(const std::string &path)
+Result<Json, DataError> loadJsonFile(
+    const std::string &path
+)
 {
     std::ifstream file(path, std::ios::binary);
     if (!file)
@@ -360,7 +378,9 @@ Result<Json, DataError> loadJsonFile(const std::string &path)
     return parseJsonText(bytes, path);
 }
 
-std::int64_t scaleToGrid(double value)
+std::int64_t scaleToGrid(
+    double value
+)
 {
     const double scaled = value * static_cast<double>(SCALE);
     // Clamp authoring absurdities instead of invoking undefined behavior in
@@ -379,7 +399,9 @@ std::int64_t scaleToGrid(double value)
     return static_cast<std::int64_t>(std::llround(scaled));
 }
 
-std::int64_t scaledValue(const Json &field)
+std::int64_t scaledValue(
+    const Json &field
+)
 {
     if (field.is_number_unsigned())
     {
@@ -397,7 +419,9 @@ std::int64_t scaledValue(const Json &field)
     return scaleToGrid(field.get<double>()); // fractional (schema-validated)
 }
 
-Json mergeData(const Json &base, const Json &overrideJson)
+Json mergeData(
+    const Json &base, const Json &overrideJson
+)
 {
     if (base.is_object() && overrideJson.is_object())
     {
@@ -407,10 +431,9 @@ Json mergeData(const Json &base, const Json &overrideJson)
             const auto existing = merged.find(member.key());
             if (existing != merged.end())
             {
-                Json child = mergeData(*existing, member.value());
+                Json child           = mergeData(*existing, member.value());
                 merged[member.key()] = std::move(child);
-            }
-            else
+            } else
             {
                 merged[member.key()] = member.value();
             }
@@ -421,7 +444,9 @@ Json mergeData(const Json &base, const Json &overrideJson)
     return overrideJson;
 }
 
-std::string pointerEscape(std::string_view key)
+std::string pointerEscape(
+    std::string_view key
+)
 {
     std::string escaped;
     escaped.reserve(key.size());
@@ -430,12 +455,10 @@ std::string pointerEscape(std::string_view key)
         if (c == '~')
         {
             escaped += "~0";
-        }
-        else if (c == '/')
+        } else if (c == '/')
         {
             escaped += "~1";
-        }
-        else
+        } else
         {
             escaped += c;
         }

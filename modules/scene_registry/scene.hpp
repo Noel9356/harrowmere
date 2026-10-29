@@ -152,7 +152,7 @@ private:
     // pointer away in that cache; here it writes one null and one counter).
     static constexpr std::size_t handleTableChunkBits = 10;
     static constexpr std::size_t handleTableChunkSize = std::size_t{1} << handleTableChunkBits;
-    using HandleChunk = std::array<RegistryEntry *, handleTableChunkSize>;
+    using HandleChunk                                 = std::array<RegistryEntry *, handleTableChunkSize>;
 
     // The chunk directory: entry k (possibly null) holds the storage for
     // handles [k * chunkSize, ...). A null entry means "no handle in this
