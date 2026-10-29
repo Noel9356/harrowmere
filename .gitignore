@@ -42,12 +42,6 @@ runtime/
 # The screenshot module writes captures here by default.
 screenshots/
 
-# Crash dumps and core files a debug run may leave behind.
-core
-core.*
-*.dump
-*.dmp
-
 # ---- IDE, editor and OS noise ---------------------------------------------
 .vscode/
 .idea/
