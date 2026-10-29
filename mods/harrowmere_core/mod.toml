@@ -1,0 +1,21 @@
+# harrowmere_core - the game's authoritative simulation and ALL base content.
+#
+# This manifest is the demand root of the whole run: everything under
+# `capabilities` pulls its provider into the assembly (transitively), and
+# `provides` publishes the game's own capability family to every other
+# component. The compiled manifest in the plugin binary must agree with this
+# file on identity and on `provides` - the kernel verifies both at startup.
+id = "harrowmere_core"
+version = "0.1.0"
+engine_api = 1
+type = "native"
+entry = "harrowmere_core"              # library base name; LIBRARY_OUTPUT_DIRECTORY lands it in this package dir
+display_name = "Game Core (authoritative simulation)"
+description = "Harrowmere's authoritative simulation: world model, characters, justice, economy, events. Owns all base game content (data/, scene.toml) and the harrowmere.core capability surface."
+capabilities = ["logging", "scene", "input"]
+provides = ["harrowmere.core"]         # native mods PROVIDE through mod.toml; the compiled manifest must agree
+optional_capabilities = ["physics", "audio", "animation", "asset"]  # degrade-if-absent is the contract (§4.0)
+permissions = ["filesystem.write"]     # saves (task 7.1) write into the user's save directory
+config_keys = ["harrowmere.tick_rate", "harrowmere.time_scale", "harrowmere.autosave_game_hours", "harrowmere.seed"]
+requires = []
+scene = "scene.toml"                   # harrowmere_core claims the world - the only claimant in the runtime (one-world rule)

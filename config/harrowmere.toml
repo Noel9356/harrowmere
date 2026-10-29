@@ -1,0 +1,171 @@
+# harrowmere runtime configuration - the ASSEMBLY layer.
+#
+# Paths are resolved relative to the game executable directory.
+#
+# This file is the highest file-backed configuration layer, and it owns
+# exactly what an assembly owns: the runtime layout, the provider wiring and
+# the permission policy - plus, for this game, the engine pacing the sim rides
+# and the trust decisions for our two native mods (both are risk-flagged by
+# definition - native machine code - so a headless run would fail the trust
+# gate without a standing decision HERE; a package defaults file may not
+# define [trust], only this assembly can).
+#
+# It deliberately holds NO module settings: the modules that carry tunables
+# ship their own defaults in modules/<name>/config.toml (copied to
+# runtime/config/modules/<name>/config.toml by the build; a module without one
+# runs on its code defaults), and the game's content package ships its
+# [harrowmere] defaults in mods/harrowmere_core/config.toml. Those defaults
+# FILL every key this file leaves unset - anything written HERE wins over
+# them. The precedence rules and the provenance report are documented in
+# docs/configuration.md.
+#
+# The world content lives with the content mod: harrowmere_core declares
+# scene = "scene.toml" in its manifest and is the run's only scene claimant
+# (the one-world rule). This file deliberately defines no [scene] section -
+# the backdrop ground plane, sky, sun and camera come from that package. An
+# assembly that wants its own world defines [scene] here (it then wins over
+# every installed content mod).
+
+[engine]
+# Modules are NOT listed here and there is no demand list either: the active
+# mods are the sole demand source. A module loads only when an active mod's
+# manifest requires a capability it provides, and the providers' own
+# requirements pull their dependencies transitively. This assembly's demand
+# roots are exactly the two game mods: harrowmere_core (logging, scene, input
+# + optional physics/audio/animation/asset) and harrowmere_ui (harrowmere,
+# input, renderer.vulkan.overlay). harrowmere_ui is what pulls the renderer
+# into the run; harrowmere_core's optional capabilities never pull a provider
+# on their own - a missing optional provider degrades the feature, never the
+# run.
+#
+# The module set itself is pinned by the trim table in the plan (§3.6): 15
+# engine modules kept, the seven unconsumed ones deleted outright. No
+# networking module exists at the pinned engine HEAD and none is wanted -
+# this game is single-player by directive (Appendix E).
+
+# Mod packages are discovered on disk, not listed here: EVERY subdirectory of
+# mod_directory is a mod package of the application (one without a mod.toml is
+# reported as a broken install and skipped). The game's two packages arrive
+# with the runtime.
+# mod_directory = "mods"
+
+# The sim rides the engine's fixed-timestep lane at 10 Hz (the tick_rate the
+# game's own [harrowmere] defaults echo - timing belongs to the engine, the
+# ORDER inside a tick belongs to the game, D-TICK-1): the composition root
+# publishes EngineFixedUpdateEvent with a CONSTANT step delta on the classic
+# accumulator loop, and max_fixed_update_steps clamps one iteration's
+# catch-up burst - a stalled frame yields at most 5 ticks, never a spiral.
+# The game writes no accumulator of its own and never will.
+fixed_update_hz = 10
+max_fixed_update_steps = 5
+
+# CPU-side frame pacing (read by the composition root after the layers
+# merge): max_fps caps the frame rate on top of the swapchain's vsync
+# (0 = uncapped, the default); idle_poll_ms paces the renderer-less event
+# pump - the headless CI shape pumps itself on this key. Both re-read on
+# every live configuration reload.
+# max_fps = 60
+# idle_poll_ms = 16
+
+# Finite runs (the headless and CI shape): quit_after_seconds ends the loop
+# after the given wall-clock time through the clean-shutdown path (exit 0) -
+# the bootstrap smoke test stages it with
+# `--set engine.quit_after_seconds=1`. 0 = run until the window closes.
+# quit_after_seconds = 1.0
+
+# Live configuration reload (opt-in, default off - the frame path pays
+# nothing unless a run asks for it): with a positive interval the frame loop
+# stats this file at that rate; a changed mtime re-assembles every layer and
+# publishes ConfigurationReloadedEvent with the changed key paths. World
+# content ([scene]) changes are reported as restart-required.
+# config_reload_poll_seconds = 0.5
+
+# Mod ids listed here are skipped during discovery; useful to keep a package
+# installed but inactive without deleting it. Disabling harrowmere_core
+# removes the simulation itself: the run then fails startup, because the app
+# acquires harrowmere.core as a hard requirement.
+# disabled_mods = []
+
+# Provider selection for capabilities that several implementations offer.
+# The key is the capability name (a family such as "renderer" when the
+# candidates are its implementation-bound members), the value is the
+# component name that should win. Only needed when more than one
+# implementation is present in the build.
+[providers]
+# physics = "physics_builtin"
+
+# Permission denials. Each entry denies one declared permission of one
+# component (module, native mod or script mod); denied permissions fail
+# startup with a precise diagnostic.
+[permissions]
+# denied = [["harrowmere_core", "filesystem.write"]]
+
+# Trust decisions over the risk advisories (docs/architecture.md, "Risk
+# advisories and the trust gate"). The kernel risk-assesses every active mod
+# AND every active module before any of their code is used: the structural
+# signals are native machine code (mods), permissions outside the
+# capability.* namespace (our filesystem.write) and a broad capability
+# acquisition surface. BOTH game mods are flagged by definition, so this
+# assembly trusts them standing - a headless run cannot answer a prompt and
+# would otherwise fail startup with the trust keys as the instructions.
+#
+# The section is assembly-owned: a mod's shipped config.toml cannot define
+# [trust] (a package that could trust itself would defeat the gate), and a
+# staged override (--set trust.trustAllMods=true) works like any key.
+[trust]
+trustMods = ["harrowmere_core", "harrowmere_ui"]
+# trustModules = []
+# trustAllMods = false
+# trustAllModules = false
+
+# Diagnostics are opt-in: the shutdown communication latency and frame-time
+# report is a developer tool. Enable it here.
+[diagnostics]
+latency_report = false
+
+# ---------------------------------------------------------------------------
+# Module overrides (all optional - every module runs on its own shipped
+# defaults without a single line here). A section written below replaces the
+# module defaults key by key, never wholesale: tables deep-merge, so a
+# one-key override leaves the module's other defaults standing.
+#
+# Where each module's settings live (the trimmed module set - behavior_tree,
+# localization_toml and radiance_cascades are deleted outright; see
+# mods/harrowmere_core/docs/DEVIATIONS.md for the build-edge restore of
+# bvh/lua_scripting/ui_imgui/persistence_toml):
+#
+#   [logging]                     modules/logging_stdout/config.toml
+#   [window]                      modules/window_glfw/config.toml
+#   [input] / [input.actions]     modules/input_glfw/config.toml (+ the game
+#                                 UI mod's config.toml for its bindings, 7.4)
+#   [renderer]                    modules/renderer_vulkan/config.toml
+#   [lighting] (max_roughness)    modules/pbr/config.toml
+#   [physics]                     modules/physics_builtin/config.toml
+#   [screenshot]                  modules/screenshot_png/config.toml
+#
+# The modules below carry no defaults file: their settings run on code
+# defaults, and the section can still be added here to tune them.
+#
+#   [audio]                       modules/audio_miniaudio (code defaults)
+#   [scene]                       modules/scene_registry (code defaults)
+#   [settings]                    modules/settings_toml (code defaults)
+#   [hot_reload]                  modules/hot_reload_watcher (code defaults)
+#   [profiler]                    modules/profiler (code defaults)
+#   [scheduler]                   modules/scheduler_frame (code defaults)
+
+# The window is the game's, not the demo's: one override on the window
+# module's default title.
+[window]
+title = "Harrowmere"
+
+# Examples - uncomment to override:
+#
+# [renderer]
+# exposure = 1.4
+#
+# [input.actions]
+# Semantic camera actions the free-fly controller consumes when defined
+# (camera_forward / camera_back / camera_left / camera_right / camera_up /
+# camera_down; "boost" and "release_cursor" are already wired). Absent keys
+# keep the fixed WASD bindings. Phase 1's 7.4P1 pins the game's own bindings.
+# camera_forward = "W, gamepad:LeftY"

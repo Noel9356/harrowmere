@@ -1,0 +1,18 @@
+# harrowmere_ui - the game's UI surface mod (empty shell, validated from day
+# one: the manifest wiring is the point of this task, the panels arrive at
+# 7.3P1/7.4P1). Consumes the sim capability through the family name
+# `harrowmere` - mod-to-mod consumption is legal (docs/architecture.md,
+# "Capability directions") - and draws on the renderer's overlay seam
+# (D-UI-1), which it owns from here on: the engine's ui_imgui module is
+# trim-deleted and must never come back (the boot test asserts its absence).
+id = "harrowmere_ui"
+version = "0.1.0"
+engine_api = 1
+type = "native"
+entry = "harrowmere_ui"                # library base name; LIBRARY_OUTPUT_DIRECTORY lands it in this package dir
+display_name = "Harrowmere UI (ImGui surface)"
+description = "Harrowmere's UI surface: debug overlay (Phase 1), HUD/panels (Phase 2). Draws through the renderer's overlay seam and reads the world through harrowmere.core views only."
+capabilities = ["harrowmere", "input", "renderer.vulkan.overlay"]
+provides = ["ui.harrowmere"]           # the UI mod's own capability; inert lifecycle until 7.3P1
+config_keys = []
+requires = []

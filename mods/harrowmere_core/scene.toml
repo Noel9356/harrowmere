@@ -1,0 +1,26 @@
+# Harrowmere's world claim - the run's initial backdrop (D-PRES-1).
+#
+# The game owns NO world art in v1: this file is a ground plane, a flat sky
+# and a sun, sized to the pinned v1 world patch (region grid 16x16 at 1024 m
+# per region, A-40 - the plane spans the whole grid). The static [scene] world
+# is the INITIAL state; the living world is the simulation's own state, shown
+# through the scene bridge (task 7.2) driving the scene capability at runtime.
+# This package is the run's only scene claimant (the one-world rule).
+[scene]
+sky_radiance = [0.20, 0.27, 0.38]
+
+[scene.camera]
+position = [24.0, 6.0, 24.0]
+look_at = [0.0, 1.0, 0.0]
+
+[scene.sun]
+direction = [-0.4, -0.8, -0.3]
+color = [1.0, 0.96, 0.88]
+intensity = 3.0
+
+# The worked land around the still water: one plane, no art.
+[[scene.objects]]
+type = "plane"
+position = [0.0, 0.0, 0.0]
+size = [8192.0, 0.01, 8192.0]
+albedo = [0.34, 0.30, 0.22]
