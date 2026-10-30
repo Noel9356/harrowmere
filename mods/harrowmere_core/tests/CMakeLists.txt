@@ -24,6 +24,8 @@ set(HARROWMERE_TEST_SOURCES
     test_events.cpp              # task 0.7 - sim event channels
     test_enums_data_loaders.cpp  # task 1.1 - closed enums + species/items/classes
     test_data_loaders_2.cpp      # task 1.2 - crime/laws/roles/territory/suspicion
+    test_registry.cpp            # task 1.3 - DataRegistry load order + cross-refs
+    test_world_laws.cpp          # task 1.4 - world model: lawsAt/socialClassOf/jurisdiction
 )
 
 add_executable(harrowmere_core_tests ${HARROWMERE_TEST_SOURCES})

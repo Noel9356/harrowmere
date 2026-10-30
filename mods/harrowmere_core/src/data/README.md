@@ -14,6 +14,7 @@ never a mid-sim crash (phase-1 exit checklist).
 | `json.hpp/.cpp` | strict loader (`loadJsonFile` / `parseJsonText`), `scaleToGrid` (THE scale conversion), `scaledValue`, `mergeData`, `utf8ErrorOffset`. The only place nlohmann headers appear. |
 | `schema.hpp/.cpp` | the schema DSL and validator (`Schema::validate` → `std::vector<DataError>`). |
 | `config.hpp/.cpp` | the configuration wrapper: `GameConfig` (pinned defaults, `[engine].mod_directory`, base data-directory resolution), `ConfigSource` (kernel-free seam), `isDeclaredConfigKey`. |
+| `registry.hpp/.cpp` | the DataRegistry (task 1.3): runs the pinned load order (enums → species → items → classes → crime → laws → roles → territory templates → suspicion), cross-references the table set, commits an all-or-nothing snapshot, and is the ONLY query surface later systems use (`species(id)` O(1) array, `defaultLaws()`, `lawSet`, `role`, `itemById`, `territoryTemplate`, `suspicionTriggers`). Hot reload is optional and OFF in v1. Cross-ref errors use logical set-key pointers (`/sets/<key>/exemptions/42`) — see DEVIATIONS.md. |
 | `config_engine.hpp` | the engine-side half of the seam: `EngineConfigSource` over the kernel's `ConfigurationStore`. The ONLY file here that includes an engine header. |
 
 ## The strictness contract
@@ -169,8 +170,11 @@ constants registry (flagged for the lead in DEVIATIONS.md; move them to
 
 - Per-content-type loaders + their schemas → tasks 1.1, 1.2 (species, items,
   classes, names / crime, laws, roles, territory templates, suspicion).
-- The cross-referencing registry over all files → task 1.3 (`DataRegistry`;
-  the optional hot-reload path re-validates via this layer between ticks).
+- The cross-referencing registry over all files → task 1.3 (`DataRegistry`,
+  landed in `registry.hpp/.cpp` above; the optional hot-reload path
+  re-validates via this layer between ticks).
+- The world model over the loaded content (regions, territory tree, the
+  three doc walks) → task 1.4 (`src/world/`, documented there).
 - Event templates / quests / recipes schemas → tasks 5.1, 6.4, 2.4. The
   `kind`-discriminated rows in `event_templates.json` (heterogeneous
   condition/action objects) are validated by their owning loader; this DSL

@@ -29,4 +29,13 @@ inline constexpr std::uint32_t kScale = static_cast<std::uint32_t>(SCALE);
 // availableXp at exactly -MAX_XP (R4); totalXp never decreases.
 inline constexpr std::int64_t MAX_XP = 1'000'000'000'000'000ll;
 
+// A-40: REGION_GRID x REGION_GRID regions of REGION_SIZE_M metres on edge —
+// the 16x16 region grid (256 regions, ~4 km^2 world; task 1.4's territoryAt
+// projection and task 1.5's worldgen region pass). The world plane spans
+// [0, REGION_GRID * REGION_SIZE_M) on both axes; positions outside it have
+// no region (src/world/region.hpp's kNoRegion) and no territory.
+inline constexpr std::uint32_t REGION_GRID   = 16;
+inline constexpr std::uint32_t REGION_SIZE_M = 1024;
+inline constexpr std::uint32_t REGION_COUNT  = REGION_GRID * REGION_GRID;
+
 } // namespace harrowmere
