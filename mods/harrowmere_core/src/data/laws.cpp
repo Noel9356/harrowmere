@@ -2,6 +2,8 @@
 #include "data/laws.hpp"
 #include "data/crime.hpp" // for crimeTypeFromKey / crimeTypeKey
 
+#include "data/json.hpp" // the sanctioned strict JSON door (D-DATA-1)
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -615,15 +617,14 @@ bool loadLawSets(
         errors.emplace_back(path, "", "could not open file");
         return false;
     }
-    nlohmann::json root;
-    try
+    // Strict JSON door (D-DATA-1): duplicate keys reject with file + pointer.
+    const data::Result<data::Json, data::DataError> parsed = data::parseJsonText(*content, path);
+    if (!parsed)
     {
-        root = nlohmann::json::parse(*content, nullptr, true, true);
-    } catch (const nlohmann::json::parse_error &e)
-    {
-        errors.emplace_back(path, "", std::string("parse error: ") + e.what());
+        errors.emplace_back(parsed.error().file, parsed.error().jsonPointer, parsed.error().message);
         return false;
     }
+    const nlohmann::json &root = parsed.value();
     if (!root.is_object())
     {
         errors.emplace_back(path, "", "laws.json must be a JSON object");
@@ -677,15 +678,14 @@ bool loadSuspicionTriggers(
         errors.emplace_back(path, "", "could not open file");
         return false;
     }
-    nlohmann::json root;
-    try
+    // Strict JSON door (D-DATA-1): duplicate keys reject with file + pointer.
+    const data::Result<data::Json, data::DataError> parsed = data::parseJsonText(*content, path);
+    if (!parsed)
     {
-        root = nlohmann::json::parse(*content, nullptr, true, true);
-    } catch (const nlohmann::json::parse_error &e)
-    {
-        errors.emplace_back(path, "", std::string("parse error: ") + e.what());
+        errors.emplace_back(parsed.error().file, parsed.error().jsonPointer, parsed.error().message);
         return false;
     }
+    const nlohmann::json &root = parsed.value();
     if (!root.is_array())
     {
         errors.emplace_back(path, "", "suspicion.json must be a JSON array");

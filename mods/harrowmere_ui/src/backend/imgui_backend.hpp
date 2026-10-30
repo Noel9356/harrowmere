@@ -11,20 +11,25 @@
 //   `ui` capability, so the boot test's `ui_imgui`-absent assertion still holds
 //   and the engine never draws an overlay through it. The widget tree --
 //   including this debug panel -- belongs to harrowmere_ui. We therefore mirror
-//   (do NOT link) ImGui's own GLFW+Vulkan example backend shipped in
-//   third_party/imgui, wrapping it in a thin class HarrowmereUi owns.
+//   (do NOT reimplement) ImGui's own GLFW+Vulkan example backend shipped under
+//   third_party/imgui at the pinned tag, wrapping its init/shutdown/new-frame/
+//   render calls in this thin class.
 //
-// Lifecycle (task 7.3P1 spec):
-//   1. HarrowmereUi::construct acquires renderer.vulkan.overlay, input, and the
-//      harrowmere (harrowmere.core) capability.
-//   2. On the first *visible* frame (renderer present AND window not iconified),
-//      HarrowmereUi calls ImGuiBackend::init. ImGui init before the backend
-//      handle bundle completes fails -- registering on the first visible frame
-//      mirrors ImGui's own example backend.
-//   3. Each frame HarrowmereUi::onFrameBegin calls beginFrame() before any
-//      ImGui:: call, draws its panels, then calls endFrame() to record the
-//      draw data into the overlay command buffer the renderer executes after
-//      the world pass.
+// Lifecycle (task 7.3P1 spec, on the engine's real overlay seam):
+//   1. HarrowmereUi::construct acquires the overlay HOST capability
+//      (renderer.vulkan.overlay - engine::RendererOverlayHostCapability), the
+//      input capability and the harrowmere (harrowmere.core) family.
+//   2. HarrowmereUi registers itself as the host's OverlayRecorder once the
+//      renderer's backend handle bundle is published (overlayBackendHandles();
+//      a renderer that has not initialized its swapchain yet publishes null --
+//      the registration retries per rendered frame, ImGui-init before the
+//      handle bundle completes fails, exactly as ImGui's own example backend
+//      does).
+//   3. The renderer calls recordOverlay once per rendered frame, after the
+//      composite wrote the swapchain image and before present (the seam's
+//      contract). That call IS the ImGui frame: beginFrame() -> the panels
+//      draw -> endFrame(context.commandBuffer) records the overlay into the
+//      frame's primary command buffer.
 //   4. HarrowmereUi::stop calls shutdown().
 //
 // All Vulkan/GLFW handles come from the engine's published capabilities; this
@@ -45,7 +50,7 @@
 namespace harrowmere::ui {
 
 // Bundle of engine handles pulled through the renderer.vulkan.overlay and
-// window/input capabilities. HarrowmereUi is responsible for acquiring them and
+// window capabilities. HarrowmereUi is responsible for acquiring them and
 // passing them in; this wrapper never queries the engine itself.
 //
 // Every Vulkan/GLFW pointer is opaque (void*) on purpose: the engine's
@@ -55,38 +60,33 @@ namespace harrowmere::ui {
 // harrowmere_capability.hpp alone. The cpp translates the void* back to the
 // typed Vulkan handles inside imgui_impl_vulkan.h's init struct.
 struct ImGuiBackendHandles {
-    // From the window capability (window.glfw). Null in a headless run --
-    // HarrowmereUi must not call init() when this is null (the overlay is
-    // renderer-coupled by design; common.md §4.4 step 13 runs per FRAME on
-    // EngineFrameEvent, which does not fire without a renderer).
-    void* glfwWindow = nullptr;          // GLFWwindow*
+    // From the window capability (window.glfw, probed optional). Null in a
+    // headless run -- HarrowmereUi must not call init() when this is null
+    // (the overlay is renderer-coupled by design; it records inside the
+    // renderer's overlay pass, which never runs without a renderer).
+    void *glfwWindow = nullptr; // GLFWwindow*
 
-    // From the renderer.vulkan.overlay capability.
-    void* vkInstance       = nullptr;     // VkInstance
-    void* vkPhysicalDevice = nullptr;     // VkPhysicalDevice
-    void* vkDevice         = nullptr;     // VkDevice
-    std::uint32_t queueFamily = ~0u;       // graphics queue family index
-    void* vkQueue          = nullptr;      // VkQueue
-    std::uint32_t imageCount   = 0;       // swapchain image count
-    void* vkRenderPass     = nullptr;      // VkRenderPass -- the overlay pass
-    std::uint32_t minImageCount = 2;       // swapchain min image count
-
-    // The overlay command buffer + descriptor pool come from the renderer's
-    // per-frame overlay slot. The renderer hands HarrowmereUi a function
-    // pointer that returns the command buffer for the *current* frame (so we
-    // never cache a stale one across frame boundaries); HarrowmereUi forwards
-    // it here so beginFrame can hand it to ImGui's Vulkan backend via
-    // ImGui_ImplVulkan_NewFrame's per-frame descriptor set plumbing.
-    void* (*acquireOverlayCommandBuffer)() = nullptr;
-    void* overlayDescriptorPool = nullptr;  // VkDescriptorPool
+    // From the renderer.vulkan.overlay host's OverlayBackendHandles bundle.
+    void *vkInstance       = nullptr; // VkInstance
+    void *vkPhysicalDevice = nullptr; // VkPhysicalDevice
+    void *vkDevice         = nullptr; // VkDevice
+    void *vkQueue          = nullptr; // VkQueue
+    std::uint32_t queueFamily = ~0u;  // graphics queue family index
+    std::uint32_t imageCount   = 0;   // live swapchain image slots
+    std::uint32_t minImageCount = 2;  // surface's minimum swapchain length
+    // The renderer's composite path records through Vulkan DYNAMIC RENDERING
+    // into the swapchain image (no classic VkRenderPass) - the bundle's
+    // colorFormat drives ImGui's UseDynamicRendering init in the cpp.
+    std::uint32_t colorFormat = 0;    // VkFormat of the swapchain (plain integer, bundle contract)
+    void *overlayDescriptorPool = nullptr; // null: the backend creates its own pool (DescriptorPoolSize)
 };
 
 // Thin wrapper around ImGui's GLFW + Vulkan backends. One instance per
 // HarrowmereUi component.
 //
 // Thread-safety: single-threaded by contract -- the engine's event bus is
-// synchronous, single-threaded (common.md §4.0), and the overlay draws on the
-// main thread. No locking here.
+// synchronous, single-threaded (common.md §4.0), and the overlay records on
+// the main thread inside the renderer's command recording. No locking here.
 class ImGuiBackend {
 public:
     ImGuiBackend();
@@ -115,21 +115,20 @@ public:
     // HarrowmereUi gates beginFrame()/endFrame() on this.
     bool ready() const noexcept;
 
-    // Begins a new ImGui frame. Must be paired with endFrame().
+    // Begins a new ImGui frame. Must be paired with endFrame(cmd).
     //
     // Calls ImGui_ImplVulkan_NewFrame + ImGui_ImplGlfw_NewFrame +
-    // ImGui::NewFrame. The renderer's overlay command buffer for this frame
-    // is fetched through handles.acquireOverlayCommandBuffer (cached at
-    // init(), resolved per-frame through the function pointer).
+    // ImGui::NewFrame.
     void beginFrame();
 
-    // Ends the ImGui frame, recording draw data into the overlay command
-    // buffer the renderer executes after the world pass.
+    // Ends the ImGui frame, recording the draw data into `commandBuffer` --
+    // the overlay pass's command buffer the renderer handed the recorder for
+    // THIS frame (engine::OverlayFrameContext::commandBuffer; never a cached
+    // handle across frame boundaries).
     //
-    // Calls ImGui::Render + ImGui_ImplVulkan_RenderDrawData with the per-frame
-    // command buffer. The renderer is responsible for submitting it; we only
-    // record.
-    void endFrame();
+    // Calls ImGui::Render + ImGui_ImplVulkan_RenderDrawData. The renderer
+    // owns the submission; we only record.
+    void endFrame(void *commandBuffer);
 
     // Tears down the Vulkan backend, the GLFW backend, and the ImGui context
     // in that order (mirror of init's reverse). Safe to call on an un-

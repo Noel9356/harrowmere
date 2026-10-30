@@ -9,21 +9,23 @@
 // mechanically). See mods/README.md, section "Portability".
 //
 // v0.1 (task 0.1): the surface below is the CONTRACT (common.md §4.2). The
-// views are inert stubs - empty snapshot types and a no-op command queue -
-// and that is deliberate: the header's shape is what later phases plug into,
-// so it exists and compiles from day one while carrying zero game behavior.
-// Phase 2 fills the view contents (rebuilt at tick step 13 each frame) and
-// wires the command queue (applied at step 9); neither the surface nor the
-// family/member names change. The write-path VOCABULARY (the SimCommand
-// intent envelope) landed with task 3.10 - see the write-path block below.
+// views began as inert stubs - and that is deliberate: the header's shape is
+// what later phases plug into. The Phase-1 runtime bootstrap (the exit
+// checklist's debug-overlay requirement) filled the Phase-1 slice of
+// WorldView/PlayerView with real snapshot data and wired the command queue
+// into the fixed-update lane; Phase 2 fills the rest (rebuilt at tick step 13
+// each frame) and owns the full command surface. The surface's names and
+// shapes only ever extend. The write-path VOCABULARY (the SimCommand intent
+// envelope) landed with task 3.10 - see the write-path block below.
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace harrowmere
 {
 
-// ---- read views (v0.1 stubs; Phase 2 fills the contents) --------------------
+// ---- read views (Phase-1 slice; Phase 2 fills the rest) ----------------------
 //
 // Views are SNAPSHOTS, not live references: rebuilt once per frame (tick step
 // 13), read by a UI frame between ticks. No view ever exposes a store
@@ -32,27 +34,161 @@ namespace harrowmere
 // (justice: reputation, warrants against you, signals - never caseScore or
 // hidden evidence; §4.6); TestUi_NoHiddenEvidenceExposed (7.3) pins the
 // whitelist.
+//
+// Phase 1 fills the fields the phase's own exit checklist names (the F1 debug
+// overlay: region, territory, law set, safe-zone flag, season, weather, tick
+// number): WorldView carries the world-underfoot summary and the tick, and
+// PlayerView carries the player transform + the two clocks. The Phase-2-only
+// surfaces (power, justice, events) exist as fields with zero/empty values so
+// the published shape does not move when 2.x/3.x fill them.
+
+// The published view vocabulary lives in its own namespace: the capability
+// surface's snapshot types must never collide with the sim-internal
+// core/... names (core/types.hpp's harrowmere::Position is the doc-pinned
+// sim-side struct; views::Position is the wire copy the UI reads).
+namespace views
+{
+
+struct Position
+{
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+};
+
+// Published vocabulary for the fields below. These are the capability
+// surface's own enums (plain data, no includes): they mirror the sim-internal
+// closed lists (core/enums.hpp, seasons.hpp) by value - the provider maps
+// between them when it rebuilds the views, and the ordinals are pinned in the
+// sim so the mapping is a cast-checked switch, never a re-derivation.
+enum class SeasonId : std::uint32_t
+{
+    Spring,
+    Summer,
+    Autumn,
+    Winter
+};
+
+enum class WeatherKind : std::uint32_t
+{
+    Clear,
+    Rain,
+    Storm,
+    Fog,
+    Snow
+};
+
+// The legal hierarchy type (sim-internal core/enums.hpp has the same closed
+// list with the docs' SCREAMING spellings; the published surface uses the
+// doc's display names).
+enum class TerritoryType : std::uint32_t
+{
+    Village,
+    City,
+    Kingdom,
+    Empire
+};
+
+// The region underfoot (the player's region cell).
+struct RegionSummary
+{
+    std::uint32_t id = 0;           // regionId (u16 space, u32 on the wire)
+    std::uint32_t manaRichness = 0; // 0..SCALE (D-LORE-3 band 9500..10000 at worldgen)
+};
+
+// The territory underfoot with its observable facets (law/safe/lawless).
+struct TerritorySummary
+{
+    std::uint64_t id = 0; // territoryId; 0 = none (unclaimed frontier)
+    TerritoryType type = TerritoryType::Village;
+    std::string lawSetKey; // the effective law set's key (lawsAt walk result)
+    bool safe = false;     // safe-zone flag
+    bool lawless = false;  // 4.6: garrison-less unconquered territory
+};
+
+struct SeasonSummary
+{
+    SeasonId season = SeasonId::Spring;
+    std::uint64_t dayOfSeason = 0; // 0-based day within the current season (A-51 length 30)
+};
+
+struct WeatherSummary
+{
+    WeatherKind kind = WeatherKind::Clear;
+};
 
 struct WorldView
-{}; // regions, territories, laws-at, safe zones, season/weather (Phase 2)
-
-struct CharactersView
-{}; // presence, species, role, power, status, needs-as-visible (Phase 2)
+{
+    RegionSummary currentRegion{};
+    TerritorySummary currentTerritory{};
+    SeasonSummary season{};
+    WeatherSummary weather{};
+    std::uint64_t tickNumber = 0; // completed sim ticks since session start
+};
 
 struct PlayerView
-{}; // the local player's full state (Phase 2)
+{
+    Position position{};          // the sim-side player transform (3.10)
+    std::uint64_t worldTime = 0;  // game seconds since world epoch (R8)
+    std::uint64_t realTime = 0;   // real seconds since session start (D-TIME-1)
+    std::uint64_t cachedPower = 0;  // Phase 2 fills (2.5); zero in Phase 1
+    std::uint64_t peakPower = 0;    // Phase 2 fills; zero in Phase 1
+    std::uint32_t level = 0;        // Phase 2 fills; zero in Phase 1
+    std::int64_t availableXp = 0;   // Phase 2 fills; zero in Phase 1
+    bool afk = false;               // D-AFK-1 (3.10)
+};
 
+// Fog-of-war whitelist (§4.2 rule 3): reputation/notoriety/warrants-against-
+// you/jail only. Phase 1 has no justice activity - the values stay zeroed.
 struct JusticeView
-{}; // reputation, notoriety, warrants against you, jail status (Phase 2)
+{
+    std::int64_t reputation = 0;
+    std::uint64_t notoriety = 0;
+    std::uint32_t activeWarrantsAgainstYou = 0;
+    bool isJailed = false;
+    std::uint64_t jailUntil = 0;
+};
+
+// One UI-visible signal (the capability-side twin of game_events.hpp's
+// PlayerSignal event - §4.2 rule 2: rejections surface back through these).
+enum class PlayerSignalKind : std::uint32_t
+{
+    Investigated,
+    Wanted,
+    Poster,
+    Greeting
+};
+
+struct PlayerSignalEntry
+{
+    PlayerSignalKind kind = PlayerSignalKind::Investigated;
+    std::string text;
+};
+
+struct UiSignals
+{
+    std::vector<PlayerSignalEntry> entries; // Phase 3 fills; empty in Phase 1
+};
+
+// One active event instance as the player may see it (Phase 1: none).
+struct EventSummary
+{
+    std::uint64_t eventId = 0;
+    std::string templateKey;
+    std::uint64_t stateId = 0;
+};
 
 struct EventsView
-{}; // joinable/active events, own contribution (Phase 2)
+{
+    std::vector<EventSummary> active; // Phase 2 fills (5.x); empty in Phase 1
+};
 
-// The UI-visible signal queue (§4.2): rejection reasons and world notices
-// surface back through these, never through exceptions. Task 0.7 pins the
-// event-side PlayerSignal struct; the capability-side queue lives here.
-struct UiSignals
+// presence, species, role, power, status, needs-as-visible - Phase 2 fills
+// (2.x); the published shape exists now so consumers compile against it.
+struct CharactersView
 {};
+
+} // namespace views
 
 // ---- write path ---------------------------------------------------------------
 //
@@ -177,12 +313,12 @@ public:
     virtual ~SimCapability()                    = default;
 
     // ---- reads: stable, cheap view snapshots (rebuilt at step 13 each frame) ----
-    virtual const WorldView &world() const;           // regions, territories, laws-at, safe zones, season/weather
-    virtual const CharactersView &characters() const; // presence, species, role, power, status, needs (as visible)
-    virtual const PlayerView &player() const;         // the local player's full state
-    virtual const JusticeView &justice() const;       // reputation, notoriety, warrants against you, jail status
-    virtual const EventsView &events() const;         // joinable/active events, own contribution
-    virtual const UiSignals &signals() const;         // PlayerSignals queue (investigated / wanted / poster / greeting)
+    virtual const views::WorldView &world() const;           // regions, territories, laws-at, safe zones, season/weather
+    virtual const views::CharactersView &characters() const; // presence, species, role, power, status, needs (as visible)
+    virtual const views::PlayerView &player() const;         // the local player's full state
+    virtual const views::JusticeView &justice() const;       // reputation, notoriety, warrants against you, jail status
+    virtual const views::EventsView &events() const;         // joinable/active events, own contribution
+    virtual const views::UiSignals &signals() const;         // PlayerSignals queue (investigated / wanted / poster / greeting)
 
     // ---- writes: commands, never direct state mutation ----
     // Queued; applied at step 9 next tick (§4.4) or rejected with a logged
@@ -192,42 +328,42 @@ public:
 private:
     // v0.1 stub storage: one inert snapshot per view. Phase 2 replaces these
     // with rebuilt-per-frame view data; the accessor signatures do not move.
-    WorldView world_{};
-    CharactersView characters_{};
-    PlayerView player_{};
-    JusticeView justice_{};
-    EventsView events_{};
-    UiSignals signals_{};
+    views::WorldView world_{};
+    views::CharactersView characters_{};
+    views::PlayerView player_{};
+    views::JusticeView justice_{};
+    views::EventsView events_{};
+    views::UiSignals signals_{};
 };
 
 // ---- inline definitions (v0.1 inert stubs) ----------------------------------
 
-inline const WorldView &SimCapability::world() const
+inline const views::WorldView &SimCapability::world() const
 {
     return world_;
 }
 
-inline const CharactersView &SimCapability::characters() const
+inline const views::CharactersView &SimCapability::characters() const
 {
     return characters_;
 }
 
-inline const PlayerView &SimCapability::player() const
+inline const views::PlayerView &SimCapability::player() const
 {
     return player_;
 }
 
-inline const JusticeView &SimCapability::justice() const
+inline const views::JusticeView &SimCapability::justice() const
 {
     return justice_;
 }
 
-inline const EventsView &SimCapability::events() const
+inline const views::EventsView &SimCapability::events() const
 {
     return events_;
 }
 
-inline const UiSignals &SimCapability::signals() const
+inline const views::UiSignals &SimCapability::signals() const
 {
     return signals_;
 }

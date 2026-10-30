@@ -1,6 +1,8 @@
 // roles.cpp — NPC role loader (Task 1.2).
 #include "data/roles.hpp"
 
+#include "data/json.hpp" // the sanctioned strict JSON door (D-DATA-1)
+
 #include <nlohmann/json.hpp>
 
 #include <array>
@@ -76,15 +78,14 @@ bool loadRoles(
         errors.emplace_back(path, "", "could not open file");
         return false;
     }
-    nlohmann::json root;
-    try
+    // Strict JSON door (D-DATA-1): duplicate keys reject with file + pointer.
+    const data::Result<data::Json, data::DataError> parsed = data::parseJsonText(*content, path);
+    if (!parsed)
     {
-        root = nlohmann::json::parse(*content, nullptr, true, true);
-    } catch (const nlohmann::json::parse_error &e)
-    {
-        errors.emplace_back(path, "", std::string("parse error: ") + e.what());
+        errors.emplace_back(parsed.error().file, parsed.error().jsonPointer, parsed.error().message);
         return false;
     }
+    const nlohmann::json &root = parsed.value();
     if (!root.is_array())
     {
         errors.emplace_back(path, "", "roles.json must be a JSON array");

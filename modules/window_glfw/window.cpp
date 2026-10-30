@@ -144,7 +144,22 @@ void WindowModule::start()
 {
     if (!glfwInit())
     {
-        throw std::runtime_error("window module: glfwInit failed");
+        // Headless degrade (the game assembly's pinned CI shape, common.md
+        // section 3.6 "headless degrades window/renderer, never input"): a
+        // display-less machine cannot initialize GLFW, but the run must keep
+        // ticking - the app's frame loop stays in the windowless pump and
+        // every WindowCapability method below guards on glfwInitialized.
+        // Failing the whole startup here would make the pinned headless
+        // smoke run (--set engine.quit_after_seconds=1.0, exit 0) impossible.
+        // A display-capable environment is unaffected: glfwInit succeeds and
+        // the main window is created right below, exactly as before.
+        if (logger != nullptr)
+        {
+            logger->logMessage(
+                LogLevel::Warning, "window module: no usable display - running windowless (headless degrade)"
+            );
+        }
+        return;
     }
     glfwInitialized    = true;
     activeWindowModule = this;

@@ -70,3 +70,32 @@ add_custom_target(harrowmere_ui_tests_alias
     DEPENDS harrowmere_ui_tests
     COMMENT "Build harrowmere_ui_tests (doctest harness, task 7.4P1)"
 )
+
+# ---- the 7.3P1 debug-panel harness -------------------------------------------
+# test_debug_panel.cpp carries its OWN doctest main (it predates the shared
+# harness convention - its header comment documents the single-main rule the
+# core harness keeps), so it joins a binary of its own: the 7.3P1 card's
+# pinned tests (TestUi_SeamRegisteredOnce, TestUi_DebugPanelBindsWorldView).
+# It links the PLUGIN objects (the backend TUs it exercises) + the ImGui
+# bindings + the capability headers ui_harrowmere.hpp includes.
+add_executable(harrowmere_ui_debug_panel_tests
+    test_debug_panel.cpp
+)
+target_link_libraries(harrowmere_ui_debug_panel_tests PRIVATE
+    harrowmere_ui_objects # the overlay component + backend + panel TUs (no plugin TU:
+                          # two mods' entry tables may never meet in one binary)
+    harrowmere_ui_imgui
+)
+target_include_directories(harrowmere_ui_debug_panel_tests SYSTEM PRIVATE
+    "${CMAKE_SOURCE_DIR}/third_party/doctest"
+)
+if(MSVC)
+    target_compile_options(harrowmere_ui_debug_panel_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(harrowmere_ui_debug_panel_tests PRIVATE -Werror)
+endif()
+add_test(
+    NAME harrowmere_ui_debug_panel_tests
+    COMMAND harrowmere_ui_debug_panel_tests
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)

@@ -24,12 +24,14 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ./build/runtime/harrowmere                 # windowed
 ./build/runtime/harrowmere --validate      # CI dry run (no backend)
-./build/runtime/harrowmere --set engine.quit_after_seconds=1   # headless smoke, exit 0
+./build/runtime/harrowmere --set engine.quit_after_seconds=1.0   # headless smoke, exit 0
 ```
 
-Exit codes: 0 clean, 1 failed startup/validate, 2 usage error, 3 graphics
-backend validation errors. Configuration paths resolve relative to the
-executable directory.
+The finite-run override is a TOML FLOAT (`1.0`, never `1`): toml++ reads no
+integer node for this key, so a staged `1` parses as unset and a finite run
+never quits (DEVIATIONS.md 2026-10-29). Exit codes: 0 clean, 1 failed
+startup/validate, 2 usage error, 3 graphics backend validation errors.
+Configuration paths resolve relative to the executable directory.
 
 ## The assembly
 
@@ -47,7 +49,7 @@ harrowmere/                      # this repo
 │   │                            #   requires logging/scene/input (+ optional physics/audio/animation/asset)
 │   │                            #   provides harrowmere.core; claims the world (scene.toml); owns data/
 │   └── harrowmere_ui/           # native mod: ImGui surface (requires harrowmere, input, renderer.vulkan.overlay;
-│                                #   provides ui.harrowmere) — empty shell at 0.1, panels arrive at 7.3P1
+│                                #   provides ui.harrowmere) — the 7.3P1 debug overlay (F1) + the 7.4P1 input layer
 ├── modules/                     # engine modules — TRIMMED to 15 (see below)
 ├── third_party/                 # engine-fetched deps
 └── docs/, cmake/                # the engine's docs & cmake helpers
@@ -125,8 +127,16 @@ mod package defaults > code defaults. Tables deep-merge; arrays and
 
 ## Tests
 
-`scripts/bootstrap_tests.sh` runs the task 0.1 acceptance (the pinned
-bootstrap tests): headless boot (exit 0, startup log line, one world
-claimant, no `ui_imgui` in the graph) and the windowed loop check. The doctest
-harness (`harrowmere_core_tests`) and the one-command CI script arrive with
-task 0.6.
+- `scripts/ci.sh` — the one-command gate (task 0.6): configure (Release,
+  warnings-as-errors) → build → ctest → `--validate`, non-zero exit on any
+  failure. ctest suites: `harrowmere_core_tests` (the card-pinned Phase-1
+  battery), `harrowmere_ui_tests` (7.4P1 input) and
+  `harrowmere_ui_debug_panel_tests` (7.3P1) — each is directory-local:
+  `ctest --test-dir build/mods/<id>/tests --output-on-failure`.
+- `scripts/bootstrap_tests.sh` — the task 0.1 acceptance (the pinned
+  bootstrap tests): headless boot (exit 0, startup log line, one world
+  claimant, no `ui_imgui` in the graph) and the windowed loop check
+  (skipped headless — it needs a display).
+- Worldgen determinism (the exit checklist): two runs with the same seed log
+  the same FNV-1a summary hash at INFO (`world generated: ... hash=...`); a
+  different seed differs.

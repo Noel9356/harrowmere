@@ -14,7 +14,7 @@ display_name = "Game Core (authoritative simulation)"
 description = "Harrowmere's authoritative simulation: world model, characters, justice, economy, events. Owns all base game content (data/, scene.toml) and the harrowmere.core capability surface."
 capabilities = ["logging", "scene", "input"]
 provides = ["harrowmere.core"]         # native mods PROVIDE through mod.toml; the compiled manifest must agree
-optional_capabilities = ["physics", "audio", "animation", "asset"]  # degrade-if-absent is the contract (§4.0)
+optional_capabilities = ["physics", "audio", "animation", "asset", "lighting"]  # degrade-if-absent is the contract (§4.0); lighting = the 7.2P1 sun seam
 permissions = ["filesystem.write"]     # saves (task 7.1) write into the user's save directory
 config_keys = ["harrowmere.tick_rate", "harrowmere.time_scale", "harrowmere.autosave_game_hours", "harrowmere.seed"]
 requires = []

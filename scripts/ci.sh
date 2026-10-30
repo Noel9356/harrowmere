@@ -3,8 +3,9 @@
 #
 #   1. configure (Release; the game targets carry warnings-as-errors)
 #   2. build (app + both mod packages + the unit-test binaries)
-#   3. ctest (harrowmere_core_tests + harrowmere_ui_tests; discovery is
-#      directory-local - see each mods/<id>/tests/CMakeLists.txt)
+#   3. ctest (harrowmere_core_tests + harrowmere_ui_tests +
+#      harrowmere_ui_debug_panel_tests; discovery is directory-local - see
+#      each mods/<id>/tests/CMakeLists.txt)
 #   4. the engine's validate() dry run (configuration, manifests, graph,
 #      permissions - no backend), exit 0 expected
 #

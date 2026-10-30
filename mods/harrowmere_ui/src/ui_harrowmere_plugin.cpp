@@ -34,10 +34,13 @@
 
 #include "input_capability.hpp"       // engine::InputCapability (required)
 #include "renderer_capability.hpp"    // engine::RendererCapability (optional camera rig)
+#include "renderer_overlay_capability.hpp" // engine::RendererOverlayHostCapability (required, 7.3P1)
+#include "window_capability.hpp"      // engine::WindowCapability (optional probe: the GLFW handle)
 #include "harrowmere_capability.hpp"  // harrowmere::SimCapability (required, family harrowmere)
 
 #include "ui_harrowmere_capability.hpp"
 #include "input_mapper.hpp"           // the 7.4P1 deliverable: seams + mapper
+#include "ui_harrowmere.hpp"          // the 7.3P1 deliverable: the overlay component
 
 // Logging shim (see imgui_backend.cpp for the rationale): the UI mod does not
 // require the logging capability in its manifest, so lifecycle lines go to
@@ -55,27 +58,30 @@ namespace
 
 // ---- the two seams, adapted onto the engine capabilities ----------------------
 
-// Phase-1 overlay gate: no overlay component is integrated in the build yet
-// (7.3P1's HarrowmereUi ships with the ImGui backend, which needs
-// third_party/imgui at the pinned tag), so both claims read false - the
-// camera look and the movement intents are never gated, and the mapper's
-// one-directional cursor release never fires. Re-entry (7.3P1 integration):
-// hold a HarrowmereUi& and forward both calls to its wantsMouse() /
-// wantsKeyboard() - the seams' semantics are already its method contract
-// (ui_harrowmere.hpp documents them for exactly this consumer), and no
-// mapper code changes.
-class Phase1UiGate final : public harrowmere::ui::UiInputGate
+// The overlay gate: forwards to the 7.3P1 overlay component's claim methods
+// (the seams' semantics are HarrowmereUi's method contract - ui_harrowmere.hpp
+// documents them for exactly this consumer). The mapper gates camera look and
+// movement intents on these so the overlay never fights the cursor.
+class OverlayUiGate final : public harrowmere::ui::UiInputGate
 {
 public:
+    explicit OverlayUiGate(harrowmere::ui::HarrowmereUi &overlay)
+        : overlay_(overlay)
+    {
+    }
+
     bool wantsMouse() const override
     {
-        return false; // overlay not integrated yet (7.3P1 re-entry note above)
+        return overlay_.wantsMouse();
     }
 
     bool wantsKeyboard() const override
     {
-        return false; // overlay not integrated yet (7.3P1 re-entry note above)
+        return overlay_.wantsKeyboard();
     }
+
+private:
+    harrowmere::ui::HarrowmereUi &overlay_;
 };
 
 // The P1 camera rig: the renderer capability's camera pose (the free-fly
@@ -131,7 +137,8 @@ public:
         manifest_.version              = "0.1.0";
         manifest_.providedCapabilities = {"ui.harrowmere"};
         manifest_.requiredCapabilities = {"harrowmere", "input", "renderer.vulkan.overlay"};
-        manifest_.optionalCapabilities = {"renderer"};
+        manifest_.optionalCapabilities = {"renderer", "window"};
+        manifest_.knownConfigKeys      = {"harrowmere_ui.key"};
     }
 
     const engine::ComponentManifest &manifest() const override
@@ -169,10 +176,17 @@ public:
         cameraRig_                           = renderer != nullptr ? std::make_unique<RendererCameraRig>(*renderer)
                                                                    : nullptr;
 
+        // The 7.3P1 overlay component (construct acquires its own
+        // capabilities, subscribes the F1 toggle, reads [harrowmere_ui] key).
+        overlay_ = std::make_unique<harrowmere::ui::HarrowmereUi>();
+        overlay_->construct(context);
+
         // The 7.4P1 input mapper over the seams. The gate and the rig are
         // members (the mapper keeps references; they outlive it - declaration
-        // order below reverses destruction correctly).
-        mapper_ = std::make_unique<harrowmere::ui::InputMapper>(input, sim, uiGate_, cameraRig_.get());
+        // order below reverses destruction correctly). The gate forwards to
+        // the overlay's claim methods.
+        gate_ = std::make_unique<OverlayUiGate>(*overlay_);
+        mapper_ = std::make_unique<harrowmere::ui::InputMapper>(input, sim, *gate_, cameraRig_.get());
 
         // One mapper update per EngineFrameEvent - the per-frame heartbeat
         // (common.md section 4.0). The dispatch strictly precedes the
@@ -192,7 +206,13 @@ public:
 
     void start() override
     {
-        HARROWMERE_LOG_INFO(HARROWMERE_LOG_CATEGORY, "harrowmere_ui 0.1.0 up (7.4P1 input mapper active, overlay pending 7.3P1)");
+        // The overlay component starts after the mapper's seams are bound
+        // (its recorder registration probes the renderer's handle bundle).
+        if (overlay_ != nullptr)
+        {
+            overlay_->start();
+        }
+        HARROWMERE_LOG_INFO(HARROWMERE_LOG_CATEGORY, "harrowmere_ui 0.1.0 up (7.3P1 overlay + 7.4P1 input mapper active)");
     }
 
     void stop() override
@@ -203,6 +223,12 @@ public:
         // reset keeps the same shape the engine modules keep.
         frameSubscription_.release();
         mapper_.reset();
+        gate_.reset();
+        if (overlay_ != nullptr)
+        {
+            overlay_->stop();
+            overlay_.reset();
+        }
         cameraRig_.reset();
     }
 
@@ -234,9 +260,11 @@ private:
     engine::ComponentManifest manifest_;
     harrowmere::UiHarrowmereCapability uiCapability_{};
 
-    // The 7.4P1 wiring. Declaration order is destruction order: the mapper
-    // (which holds references into the gate and the rig) dies before them.
-    Phase1UiGate uiGate_{};
+    // The 7.3P1 + 7.4P1 wiring. Declaration order is destruction order: the
+    // mapper (which holds references into the gate and the rig) dies before
+    // them, and the overlay outlives both (the gate forwards into it).
+    std::unique_ptr<harrowmere::ui::HarrowmereUi> overlay_;
+    std::unique_ptr<OverlayUiGate> gate_;
     std::unique_ptr<RendererCameraRig> cameraRig_;
     std::unique_ptr<harrowmere::ui::InputMapper> mapper_;
     engine::EventSubscription frameSubscription_;

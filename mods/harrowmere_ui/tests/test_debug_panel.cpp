@@ -108,26 +108,36 @@ TEST_CASE("TestUi_DebugPanelBindsWorldView") {
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;     // don't write imgui.ini during tests
     io.LogFilename = nullptr;    // don't write imgui_log.txt during tests
+    // A headless frame: ImGui requires a display size, a built font atlas
+    // (the CPU-side stb_truetype build - the canonical headless recipe, no
+    // GLFW/Vulkan involved) and a NewFrame before any widget call (Begin
+    // outside a frame is undefined).
+    io.DisplaySize = ImVec2(1280.0f, 720.0f);
+    io.DeltaTime = 1.0f / 60.0f;
+    unsigned char *fontPixels = nullptr;
+    int fontWidth = 0, fontHeight = 0;
+    io.Fonts->GetTexDataAsRGBA32(&fontPixels, &fontWidth, &fontHeight);
+    ImGui::NewFrame();
 
     // Build the views. The fields used here are the ones the panel reads in
     // panels/debug.cpp; if the as-built harrowmere_capability.hpp uses
     // different names, this TU fails to compile -- which is exactly the
     // compile-time binding contract being tested.
-    harrowmere::WorldView world{};
+    harrowmere::views::WorldView world{};
     world.currentRegion.id = 42;
     world.currentRegion.manaRichness = 9800;  // D-LORE-3 band
     world.currentTerritory.id = 7;
-    world.currentTerritory.type = harrowmere::TerritoryType::Village;
+    world.currentTerritory.type = harrowmere::views::TerritoryType::Village;
     world.currentTerritory.lawSetKey = "default";
     world.currentTerritory.safe = true;
     world.currentTerritory.lawless = false;
-    world.season.season = harrowmere::SeasonId::Spring;
+    world.season.season = harrowmere::views::SeasonId::Spring;
     world.season.dayOfSeason = 5;
-    world.weather.kind = harrowmere::WeatherKind::Clear;
+    world.weather.kind = harrowmere::views::WeatherKind::Clear;
     world.tickNumber = 12345;
 
-    harrowmere::PlayerView player{};
-    player.position = harrowmere::Position{128.0, 0.0, 256.0};
+    harrowmere::views::PlayerView player{};
+    player.position = harrowmere::views::Position{128.0, 0.0, 256.0};
     player.cachedPower = 50000;
     player.peakPower   = 55000;
     player.level       = 5;
@@ -135,17 +145,17 @@ TEST_CASE("TestUi_DebugPanelBindsWorldView") {
     player.worldTime   = 86400ull * 5;  // day 5
     player.realTime    = 600;
 
-    harrowmere::JusticeView justice{};
+    harrowmere::views::JusticeView justice{};
     justice.reputation = 0;
     justice.notoriety  = 0;
     justice.activeWarrantsAgainstYou = 0;
     justice.isJailed  = false;
     justice.jailUntil = 0;
 
-    harrowmere::EventsView events{};
+    harrowmere::views::EventsView events{};
     // No active events in Phase 1 (no events system yet -- card 5.1 is Phase 3).
 
-    harrowmere::UiSignals signals{};
+    harrowmere::views::UiSignals signals{};
     // No signals in Phase 1.
 
     // The binding call. If the panel's signature or the view shapes drift,
@@ -166,6 +176,9 @@ TEST_CASE("TestUi_DebugPanelBindsWorldView") {
                                     /*fps=*/60, &closed);
     REQUIRE_FALSE(closed);
 
+    // Close the frame the panel drew in (Render finalizes; the draw data is
+    // dropped - there is no renderer to submit it).
+    ImGui::Render();
     ImGui::DestroyContext();
     (void)ctx;
 }

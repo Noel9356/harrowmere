@@ -10,6 +10,8 @@
 //     at the offending value, not the whole file.
 #include "data/crime.hpp"
 
+#include "data/json.hpp" // the sanctioned strict JSON door (D-DATA-1)
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -161,23 +163,16 @@ bool loadCrimeData(
         return false;
     }
 
-    // Parse strict (rejects duplicate keys, trailing garbage, comments).
-    nlohmann::json root;
-    try
+    // Parse through the game's STRICT JSON door (D-DATA-1): duplicate keys,
+    // trailing garbage, invalid UTF-8 and comments all reject with file +
+    // pointer + expected - the exact failure shape the plan pins on startup.
+    const data::Result<data::Json, data::DataError> parsed = data::parseJsonText(*content, path);
+    if (!parsed)
     {
-        root = nlohmann::json::parse(
-            *content,
-            /*cb=*/nullptr,
-            /*allow_exceptions=*/true,
-            /*ignore_comments=*/true
-        );
-    } catch (const nlohmann::json::parse_error &e)
-    {
-        // nlohmann's `id` field is a JSON pointer to the offending byte;
-        // surface it as the file path's location for the DataRegistry.
-        errors.emplace_back(path, "", std::string("parse error: ") + e.what());
+        errors.emplace_back(parsed.error().file, parsed.error().jsonPointer, parsed.error().message);
         return false;
     }
+    const nlohmann::json &root = parsed.value();
 
     if (!root.is_array())
     {

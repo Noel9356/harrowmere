@@ -192,37 +192,37 @@ public:
     mutable std::uint32_t readCount = 0; // the view readers are const (4.2)
     std::vector<harrowmere::SimCommand> submitted;
 
-    const harrowmere::WorldView &world() const override
+    const harrowmere::views::WorldView &world() const override
     {
         ++readCount;
         return SimCapability::world();
     }
 
-    const harrowmere::CharactersView &characters() const override
+    const harrowmere::views::CharactersView &characters() const override
     {
         ++readCount;
         return SimCapability::characters();
     }
 
-    const harrowmere::PlayerView &player() const override
+    const harrowmere::views::PlayerView &player() const override
     {
         ++readCount;
         return SimCapability::player();
     }
 
-    const harrowmere::JusticeView &justice() const override
+    const harrowmere::views::JusticeView &justice() const override
     {
         ++readCount;
         return SimCapability::justice();
     }
 
-    const harrowmere::EventsView &events() const override
+    const harrowmere::views::EventsView &events() const override
     {
         ++readCount;
         return SimCapability::events();
     }
 
-    const harrowmere::UiSignals &signals() const override
+    const harrowmere::views::UiSignals &signals() const override
     {
         ++readCount;
         return SimCapability::signals();

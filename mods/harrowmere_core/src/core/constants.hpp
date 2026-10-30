@@ -44,6 +44,13 @@ inline constexpr std::uint32_t REGION_COUNT  = REGION_GRID * REGION_GRID;
 // lifespan] and clamps the `child` role under it.
 inline constexpr std::uint32_t ADULT_YEARS = 16;
 
+// A-39: CELL_SIZE_M = 32. The spatial index's uniform cell edge (task 1.6):
+// ~10 NPCs/cell average at the full planned population — a radius query
+// scans a handful of cells, never a tree. src/world/spatial_grid.hpp derives
+// its cell projection from this one constant (A-39 is the only home).
+// Integer: the world plane must tile evenly into cells (compile-checked).
+inline constexpr std::uint32_t CELL_SIZE_M = 32;
+
 // ---- task 3.8: seasons & weather (Appendix A.6) -------------------------------
 
 // A-51: SEASON_LENGTH_GAME_DAYS = 30. One season per game-month; the four

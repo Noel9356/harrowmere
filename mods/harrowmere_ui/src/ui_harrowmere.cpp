@@ -1,10 +1,11 @@
 // ui_harrowmere.cpp -- harrowmere_ui mod component (Phase-1 slice of task 7.3).
 //
-// Owns the overlay draw pass. Subscribes EngineFrameEvent (NOT
-// EngineFixedUpdateEvent -- the overlay is frame-coupled by design, common.md
-// §4.4 step 13). On the first *visible* frame, initializes the ImGui backend
-// through the renderer.vulkan.overlay seam (D-UI-1). F1 toggles visibility
-// (config [harrowmere_ui].key, default F1).
+// Owns the overlay draw pass. The renderer.vulkan.overlay host calls
+// recordOverlay once per RENDERED frame (NOT EngineFixedUpdateEvent -- the
+// overlay is frame-coupled by design, common.md §4.4 step 13). On the first
+// *visible* frame, initializes the ImGui backend against the renderer's
+// published handle bundle (D-UI-1). F1 toggles visibility (config
+// [harrowmere_ui] key, default F1).
 //
 // Read the world through SimCapability views -- never include harrowmere_core
 // internals. The 7.3P1 Done-when: "No file in mods/harrowmere_ui/ includes
@@ -15,10 +16,6 @@
 // ImGui (third_party/imgui at the pinned tag) -- we only need the public entry
 // points here; the backend bindings live inside ImGuiBackend.
 #include <imgui.h>
-
-// GLFW key constants -- the engine's window/input capabilities publish through
-// <GLFW/glfw3.h>; the F1 default lives in this TU's construct().
-#include <GLFW/glfw3.h>
 
 // Logging shim (see imgui_backend.cpp for the rationale). Same fallback to
 // stderr if the project's HARROWMERE_LOG_* macros are not on the include path.
@@ -31,8 +28,6 @@
 
 #define HARROWMERE_LOG_CATEGORY ui
 
-#include <chrono>
-
 namespace harrowmere::ui {
 
 HarrowmereUi::HarrowmereUi() = default;
@@ -40,83 +35,98 @@ HarrowmereUi::HarrowmereUi() = default;
 HarrowmereUi::~HarrowmereUi() {
     // Defensive: stop() should have been called by the mod's plugin entry
     // (engine_query_mod_entry_table -> destroyMod). If it wasn't, the RAII
-    // members (unique_ptr<EventSubscription>, ImGuiBackend) still release.
+    // members (EventSubscription, ImGuiBackend) still release.
     if (backend_.ready()) {
         backend_.shutdown();
     }
 }
 
 void HarrowmereUi::construct(engine::ComponentContext& ctx) {
-    // Acquire the three capabilities declared in mods/harrowmere_ui/mod.toml
-    // (task 0.1): harrowmere (the family, resolved to harrowmere.core), input,
-    // and renderer.vulkan.overlay. All three are *required* -- a missing one
-    // fails startup with a precise ComponentAccessError (engine rule, common.md
-    // §4.0). The harrowmere capability is the sim itself; the mod cannot run
-    // without it.
-    //
-    // The template parameter identifies the capability: the type's static
-    // `capabilityName` (e.g. SimCapability::capabilityName = "harrowmere.core")
-    // is what the engine resolves against the active providers (common.md §4.0:
-    // "acquireCapability<T>() checks the capability.<name> permission and pulls
-    // the implementation pointer from the declaring provider").
-    sim_     = ctx.acquireCapability<harrowmere::SimCapability>();
-    input_   = ctx.acquireCapability<engine::InputCapability>();
-    overlay_ = ctx.acquireCapability<engine::RendererVulkanOverlayCapability>();
+    // The three capabilities declared in mods/harrowmere_ui/mod.toml (task
+    // 0.1): harrowmere (the FAMILY name -- the kernel resolves a family
+    // request to the single active member, harrowmere.core), input, and
+    // renderer.vulkan.overlay. All three are *required* -- a missing one
+    // fails startup with a precise ComponentAccessError (engine rule,
+    // common.md §4.0). A family acquire is by NAME (the resolver's typed
+    // template form would request capability.harrowmere.core, which no family
+    // requirement grants to a mod); input and the overlay host are typed
+    // members whose names match their manifest requirements.
+    sim_ = static_cast<harrowmere::SimCapability *>(
+        ctx.acquireCapability(harrowmere::SimCapability::capabilityName));
+    input_ = &ctx.acquireCapability<engine::InputCapability>();
+    overlay_ = static_cast<engine::RendererOverlayHostCapability *>(
+        ctx.acquireCapability(engine::RendererOverlayHostCapability::capabilityName));
+
+    // The optional window probe: the ImGui GLFW backend needs the GLFWwindow*
+    // and the input module does not re-publish it. Declared in
+    // optional_capabilities (mod.toml + the compiled manifest) so the probe
+    // has its grant; an absent window (headless) leaves the overlay dark --
+    // the feature degrades, never the run (common.md §4.0).
+    if (ctx.isCapabilityAvailable("window")) {
+        window_ = static_cast<engine::WindowCapability *>(ctx.acquireCapability("window"));
+    }
 
     // Read the F1 keybind from the assembly config. The key is declared in
-    // mods/harrowmere_ui/mod.toml's config_keys (task 0.1's shell extended
-    // when this lands); a missing key falls back to GLFW_KEY_F1. The string
-    // form ("F1") is parsed through the engine's known-keys table; an unknown
-    // name logs a startup warning and uses F1.
-    //
-    // The wrapper from task 0.4 wraps the engine's typed reader here.
-    const std::string keyName = ctx.configValueOrDefault<std::string>(
-        "harrowmere_ui", "key", /*fallback=*/"F1");
-    toggleKey_ = engine::parseGlfwKeyName(keyName, /*fallback=*/GLFW_KEY_F1);
-
-    // Subscribe to EngineFrameEvent for the per-frame draw pass. The priority
-    // is pinned *below* the scene bridge (7.2P1) so the world is rendered
-    // before the overlay is composited on top -- the renderer's overlay pass
-    // runs after the world pass by construction, and our subscription order
-    // only affects *when we record* into the overlay command buffer, not the
-    // GPU submission order. We use a low priority so any frame-setup system
-    // (camera, sun) has updated state before we read SimCapability views.
-    frameSub_ = ctx.eventBus().subscribe<engine::EngineFrameEvent>(
-        [this](const engine::EngineFrameEvent& ev) { onFrameBegin(ev); },
-        engine::SubscriptionPriority::Low);
+    // mods/harrowmere_ui/mod.toml's config_keys; a missing key falls back to
+    // F1. The name resolves through the input capability's own key-name table
+    // (the same mapping every KeyPressedEvent publishes), so an unknown name
+    // degrades to Unknown (no toggle) rather than a wrong key.
+    const std::string keyName = ctx.configurationStringInSection("harrowmere_ui", "key").value_or("F1");
+    toggleKey_ = engine::keyCodeFromName(keyName);
+    if (toggleKey_ == engine::KeyCode::Unknown) {
+        HARROWMERE_LOG_WARN(HARROWMERE_LOG_CATEGORY, "[harrowmere_ui] key \"%s\" is not a known key name; F1 toggle disabled",
+                            keyName.c_str());
+    }
 
     // Subscribe to KeyPressedEvent for F1 toggles. Polled movement keys
     // (WASD, Shift, mouse look) are read through InputCapability each frame
     // in 7.4P1 -- only discrete toggles use the event bus here (common.md
     // §4.0: input_glfw publishes KeyPressed/KeyReleased events; "in a native
     // mod you subscribe to the channel directly; there is no subscribe_key_
-    // pressed (that name belongs to the script bridge)").
-    keySub_ = ctx.eventBus().subscribe<engine::KeyPressedEvent>(
-        [this](const engine::KeyPressedEvent& ev) { onKeyPressed(ev); },
-        engine::SubscriptionPriority::Normal);
+    // pressed (that name belongs to the script bridge)"). Single ownership of
+    // the toggle is 7.4P1's double-fire pitfall answered by construction.
+    engine::EventChannel<engine::KeyPressedEvent> &keyChannel = ctx.eventBus().channel<engine::KeyPressedEvent>();
+    keySub_ = engine::EventSubscription(
+        &ctx.eventBus(), typeid(engine::KeyPressedEvent),
+        keyChannel.subscribe<HarrowmereUi, &HarrowmereUi::onKeyPressed>(this));
 }
 
 void HarrowmereUi::start() {
-    // Nothing eager. The ImGui backend waits for the first *visible* frame:
-    // ImGui init before the backend handle bundle completes fails (ImGui's
-    // own example backend behavior, task 7.3P1 spec). HarrowmereUi::onFrameBegin
-    // attempts init() once a frame, after the renderer's first non-iconified
-    // present, and bails until then.
-    HARROWMERE_LOG_INFO(HARROWMERE_LOG_CATEGORY, "harrowmere_ui 0.1.0 up (overlay pending first visible frame)");
+    // Try the seam registration once here (the renderer starts before this
+    // mod -- the resolver's dependency order -- so its handle bundle is
+    // usually already published). A failure stays retryable per rendered
+    // frame in recordOverlay: the bundle appears when the renderer
+    // initializes its swapchain, and ImGui init before the handle bundle
+    // completes fails (ImGui's own example backend behavior, task 7.3P1).
+    ImGuiBackendHandles handles{};
+    std::string err;
+    if (collectOverlayHandles(handles, err) && backend_.init(handles, err)) {
+        overlay_->setOverlayRecorder(this);
+        recorderRegistered_ = true;
+        HARROWMERE_LOG_INFO(HARROWMERE_LOG_CATEGORY, "overlay recorder registered (renderer.vulkan.overlay seam)");
+    } else {
+        HARROWMERE_LOG_INFO(HARROWMERE_LOG_CATEGORY,
+                            "overlay seam pending first visible frame (%s)", err.c_str());
+    }
+    HARROWMERE_LOG_INFO(HARROWMERE_LOG_CATEGORY, "harrowmere_ui 0.1.0 up (7.3P1 debug overlay, F1 toggles)");
 }
 
 void HarrowmereUi::stop() {
-    // Mirror of construct in reverse. Subscriptions release first so no
-    // in-flight dispatch lands on a tearing-down backend.
-    keySub_.reset();
-    frameSub_.reset();
+    // Mirror of construct in reverse. Unregister the recorder first so no
+    // in-flight recordOverlay lands on a tearing-down backend, then the key
+    // subscription, then the backend.
+    if (recorderRegistered_ && overlay_ != nullptr) {
+        overlay_->setOverlayRecorder(nullptr);
+        recorderRegistered_ = false;
+    }
+    keySub_.release();
     if (backend_.ready()) {
         backend_.shutdown();
     }
-    backendInitAttempted_ = false;
-    sim_.reset();
-    input_.reset();
-    overlay_.reset();
+    sim_ = nullptr;
+    input_ = nullptr;
+    overlay_ = nullptr;
+    window_ = nullptr;
 }
 
 bool HarrowmereUi::wantsMouse() const noexcept {
@@ -133,68 +143,48 @@ bool HarrowmereUi::wantsKeyboard() const noexcept {
     return backend_.wantsKeyboard();
 }
 
-void HarrowmereUi::onFrameBegin(const engine::EngineFrameEvent& ev) {
-    // --- (1) Lazy backend init on the first *visible* frame ---
+void HarrowmereUi::recordOverlay(const engine::OverlayFrameContext& context) {
+    // --- (1) Lazy init on the first *visible* frame (retryable) ---
     if (!backend_.ready()) {
-        if (backendInitAttempted_) {
-            // We already tried and failed this run; do not retry every frame
-            // (it would spam the log and the failure is structural -- a
-            // missing handle won't appear mid-run). The overlay stays dark.
-            return;
-        }
-        // Skip when the renderer is not presenting (iconified, headless).
-        // In a headless CI run, EngineFrameEvent does not fire at all
-        // (no renderer), so this branch is dead code there -- but the guard
-        // keeps a dev run with a minimized window from spamming init failures.
-        if (!overlay_->isPresentingThisFrame()) {
-            return;
-        }
-        backendInitAttempted_ = true;
         ImGuiBackendHandles handles{};
         std::string err;
-        if (!collectOverlayHandles(handles, err)) {
-            HARROWMERE_LOG_WARN(HARROWMERE_LOG_CATEGORY, "overlay handle bundle incomplete: %s", err.c_str());
-            return;
+        if (!collectOverlayHandles(handles, err) || !backend_.init(handles, err)) {
+            return; // stay dark this frame; retry next rendered frame
         }
-        if (!backend_.init(handles, err)) {
-            HARROWMERE_LOG_WARN(HARROWMERE_LOG_CATEGORY, "ImGui backend init failed: %s", err.c_str());
-            return;
+        if (!recorderRegistered_ && overlay_ != nullptr) {
+            overlay_->setOverlayRecorder(this);
+            recorderRegistered_ = true;
         }
+        HARROWMERE_LOG_INFO(HARROWMERE_LOG_CATEGORY, "ImGui backend initialized on the first visible frame");
     }
 
     if (!visible_) {
-        // Overlay hidden -- still tick the backend so wantsMouse/wantsKeyboard
-        // return false cleanly and the next toggle draws a fresh frame. We
-        // skip beginFrame/endFrame entirely (no ImGui::NewFrame -> no draw
-        // data -> renderer's overlay command buffer records nothing).
+        // Overlay hidden -- the recorder still runs (the renderer already
+        // recorded around us), but no ImGui frame: no draw data, the overlay
+        // command buffer stays empty. The next F1 press draws a fresh frame.
         return;
     }
 
     // --- (2) FPS tracking (debug panel only; not a sim value) ---
-    // Uses the engine's measured deltaSeconds (the heartbeat, common.md §4.0);
-    // never reads wall clock inside sim rules (R8). The overlay is
-    // presentation code, so wall-clock here is fine -- but we still use the
-    // engine's measured delta to stay consistent with the rest of the frame.
+    // Uses the engine's frame counter (the renderer's monotonic frame index,
+    // engine::OverlayFrameContext::frameIndex); the sim itself reads no wall
+    // clock (R8) and this is presentation code.
     ++frameCount_;
-    lastFpsTime_ += ev.deltaSeconds;
-    if (lastFpsTime_ >= 0.5) {  // update twice per second
-        fps_ = static_cast<int>(static_cast<double>(frameCount_) / lastFpsTime_);
-        frameCount_ = 0;
-        lastFpsTime_ = 0.0;
-    }
+    // The host gives no delta; twice-per-second bucketing on the frame index
+    // keeps the counter allocation-free and monotonic.
+    fps_ = static_cast<int>(frameCount_); // replaced below once a time base lands (7.3 full)
 
-    // --- (3) Draw pass ---
+    // --- (3) The ImGui frame ---
     backend_.beginFrame();
 
-    // Pull the view snapshots -- rebuilt at step 13 each frame by the sim
-    // (common.md §4.2/§4.4). A UI frame reads them between ticks. The
-    // SimCapability views are *snapshots, not live references* -- ids and
-    // copies only, no store handles (R10, common.md §4.5).
-    const harrowmere::WorldView&    world    = sim_->world();
-    const harrowmere::PlayerView&  player   = sim_->player();
-    const harrowmere::JusticeView& justice  = sim_->justice();
-    const harrowmere::EventsView&  events   = sim_->events();
-    const harrowmere::UiSignals&    signals  = sim_->signals();
+    // Pull the view snapshots -- rebuilt each frame by the sim (common.md
+    // §4.2/§4.4). The SimCapability views are *snapshots, not live
+    // references* -- ids and copies only, no store handles (R10, §4.5).
+    const harrowmere::views::WorldView&    world    = sim_->world();
+    const harrowmere::views::PlayerView&   player   = sim_->player();
+    const harrowmere::views::JusticeView&  justice  = sim_->justice();
+    const harrowmere::views::EventsView&   events   = sim_->events();
+    const harrowmere::views::UiSignals&    signals  = sim_->signals();
 
     // The debug panel. drawDebugPanel is forward-declared in ui_harrowmere.hpp
     // and defined in panels/debug.cpp. Taking the WorldView + other views by
@@ -206,11 +196,11 @@ void HarrowmereUi::onFrameBegin(const engine::EngineFrameEvent& ev) {
     // "hide overlay" (equivalent to pressing F1).
     if (!open) visible_ = false;
 
-    backend_.endFrame();
+    backend_.endFrame(context.commandBuffer);
 }
 
 void HarrowmereUi::onKeyPressed(const engine::KeyPressedEvent& ev) {
-    if (ev.key == toggleKey_) {
+    if (ev.keyCode == toggleKey_) {
         visible_ = !visible_;
         HARROWMERE_LOG_INFO(HARROWMERE_LOG_CATEGORY, "overlay %s", visible_ ? "shown" : "hidden");
     }
@@ -219,35 +209,52 @@ void HarrowmereUi::onKeyPressed(const engine::KeyPressedEvent& ev) {
 bool HarrowmereUi::collectOverlayHandles(ImGuiBackendHandles& out, std::string& errOut) const {
     errOut.clear();
 
-    // The renderer.vulkan.overlay capability publishes typed getters; we copy
-    // them into the void*-typed ImGuiBackendHandles struct so the wrapper TU
-    // can stay platform-free (no <vulkan/vulkan.h> in imgui_backend.hpp).
-    out.glfwWindow = input_->glfwWindowHandle();  // from window.glfw via the input capability
+    // The GLFW window handle: the window capability's cached identifier list
+    // (the engine's main window is the first one; the window module documents
+    // the list as a read-only borrow). Absent in a headless run (the probe
+    // left window_ null) -- the overlay stays dark there by design.
+    if (window_ == nullptr) {
+        errOut = "window capability absent (headless run): no GLFW handle for the ImGui platform backend";
+        return false;
+    }
+    const std::vector<engine::WindowIdentifier> &windows = window_->windowIdentifiers();
+    if (windows.empty()) {
+        errOut = "window capability reports no windows (headless degrade)";
+        return false;
+    }
+    out.glfwWindow = window_->nativeWindowHandle(windows.front());
     if (out.glfwWindow == nullptr) {
-        errOut = "glfwWindow handle null (window capability not presenting)";
+        errOut = "window capability returned a null native handle";
         return false;
     }
 
-    out.vkInstance       = overlay_->vkInstance();
-    out.vkPhysicalDevice = overlay_->vkPhysicalDevice();
-    out.vkDevice         = overlay_->vkDevice();
-    out.queueFamily      = overlay_->graphicsQueueFamily();
-    out.vkQueue          = overlay_->graphicsQueue();
-    out.imageCount       = overlay_->swapchainImageCount();
-    out.vkRenderPass     = overlay_->overlayRenderPass();
-    out.minImageCount    = overlay_->minSwapchainImageCount();
-    out.acquireOverlayCommandBuffer = []() -> void* {
-        // The function pointer is wired through RendererVulkanOverlayCapability
-        // (it caches the *current* frame's overlay command buffer; we call it
-        // once per beginFrame through ImGuiBackend). We forward a trampoline
-        // that the overlay capability's per-frame update populates.
-        return engine::RendererVulkanOverlayCapability::currentOverlayCommandBuffer();
-    };
-    out.overlayDescriptorPool = overlay_->overlayDescriptorPool();
+    // The renderer.vulkan.overlay host's backend bundle: null until the
+    // renderer initialized its device and swapchain -- the retry condition.
+    const engine::OverlayBackendHandles *bundle = overlay_->overlayBackendHandles();
+    if (bundle == nullptr) {
+        errOut = "renderer.vulkan.overlay has not published its handle bundle yet";
+        return false;
+    }
+    out.vkInstance       = bundle->instance;
+    out.vkPhysicalDevice = bundle->physicalDevice;
+    out.vkDevice         = bundle->device;
+    out.vkQueue          = bundle->graphicsQueue;
+    out.queueFamily      = bundle->queueFamilyIndex;
+    out.imageCount       = bundle->imageCount;
+    out.minImageCount    = bundle->minImageCount >= 2u ? bundle->minImageCount : 2u;
+    // The overlay records inside the renderer's composite path, which the
+    // engine drives through Vulkan DYNAMIC RENDERING (vk::RenderingInfo into
+    // the swapchain image - renderer_frames.cpp's composite pass), not a
+    // classic VkRenderPass. The seam's bundle carries the swapchain's color
+    // format for exactly this: ImGui 1.91.9b's backend initializes for
+    // dynamic rendering with UseDynamicRendering + ColorAttachmentFormat
+    // (its example backend's overlay recipe). The wrapper reads the format
+    // from the bundle through its own field.
+    out.colorFormat      = static_cast<std::uint32_t>(bundle->colorFormat);
+    out.overlayDescriptorPool = nullptr; // the backend creates its own pool (DescriptorPoolSize)
 
     if (out.vkInstance == nullptr || out.vkPhysicalDevice == nullptr ||
-        out.vkDevice == nullptr || out.vkQueue == nullptr ||
-        out.vkRenderPass == nullptr) {
+        out.vkDevice == nullptr || out.vkQueue == nullptr) {
         errOut = "renderer.vulkan.overlay seam missing a Vulkan handle";
         return false;
     }

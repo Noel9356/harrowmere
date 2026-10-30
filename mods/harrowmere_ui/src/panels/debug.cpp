@@ -42,55 +42,55 @@ namespace {
 // per design reference §Conventions (common.md F.1); the overlay is
 // presentation code so f64 here is fine (R5 forbids f64 only in *game rules*,
 // not presentation).
-void formatPosition(char* buf, std::size_t bufSize, const harrowmere::Position& p) {
+void formatPosition(char* buf, std::size_t bufSize, const harrowmere::views::Position& p) {
     std::snprintf(buf, bufSize, "(%.1f, %.1f, %.1f)", p.x, p.y, p.z);
 }
 
 // Helper -- formats a season id to the doc name. The SeasonId enum is closed
 // (spring/summer/autumn/winter per A-51 / task 3.8); a missing case is a
 // compile-time gap to fix, not a runtime branch.
-const char* seasonName(harrowmere::SeasonId s) {
+const char* seasonName(harrowmere::views::SeasonId s) {
     switch (s) {
-        case harrowmere::SeasonId::Spring: return "Spring";
-        case harrowmere::SeasonId::Summer: return "Summer";
-        case harrowmere::SeasonId::Autumn: return "Autumn";
-        case harrowmere::SeasonId::Winter: return "Winter";
+        case harrowmere::views::SeasonId::Spring: return "Spring";
+        case harrowmere::views::SeasonId::Summer: return "Summer";
+        case harrowmere::views::SeasonId::Autumn: return "Autumn";
+        case harrowmere::views::SeasonId::Winter: return "Winter";
     }
     return "?";
 }
 
 // Helper -- formats a weather kind. WeatherKind is closed (task 3.8): clear,
 // rain, storm, fog, snow.
-const char* weatherName(harrowmere::WeatherKind w) {
+const char* weatherName(harrowmere::views::WeatherKind w) {
     switch (w) {
-        case harrowmere::WeatherKind::Clear: return "Clear";
-        case harrowmere::WeatherKind::Rain:  return "Rain";
-        case harrowmere::WeatherKind::Storm: return "Storm";
-        case harrowmere::WeatherKind::Fog:   return "Fog";
-        case harrowmere::WeatherKind::Snow:  return "Snow";
+        case harrowmere::views::WeatherKind::Clear: return "Clear";
+        case harrowmere::views::WeatherKind::Rain:  return "Rain";
+        case harrowmere::views::WeatherKind::Storm: return "Storm";
+        case harrowmere::views::WeatherKind::Fog:   return "Fog";
+        case harrowmere::views::WeatherKind::Snow:  return "Snow";
     }
     return "?";
 }
 
 // Helper -- formats a territory type. TerritoryType is closed (task 1.1):
 // VILLAGE / CITY / KINGDOM / EMPIRE.
-const char* territoryTypeName(harrowmere::TerritoryType t) {
+const char* territoryTypeName(harrowmere::views::TerritoryType t) {
     switch (t) {
-        case harrowmere::TerritoryType::Village: return "Village";
-        case harrowmere::TerritoryType::City:     return "City";
-        case harrowmere::TerritoryType::Kingdom:  return "Kingdom";
-        case harrowmere::TerritoryType::Empire:    return "Empire";
+        case harrowmere::views::TerritoryType::Village: return "Village";
+        case harrowmere::views::TerritoryType::City:     return "City";
+        case harrowmere::views::TerritoryType::Kingdom:  return "Kingdom";
+        case harrowmere::views::TerritoryType::Empire:    return "Empire";
     }
     return "?";
 }
 
 }  // namespace
 
-void drawDebugPanel(const harrowmere::WorldView&    world,
-                    const harrowmere::PlayerView&  player,
-                    const harrowmere::JusticeView& justice,
-                    const harrowmere::EventsView&  events,
-                    const harrowmere::UiSignals&   signals,
+void drawDebugPanel(const harrowmere::views::WorldView&    world,
+                    const harrowmere::views::PlayerView&  player,
+                    const harrowmere::views::JusticeView& justice,
+                    const harrowmere::views::EventsView&  events,
+                    const harrowmere::views::UiSignals&   signals,
                     int                             fps,
                     bool*                           pOpen) {
     // The window's collapse/close flags. The close button (ImGuiWindowFlags_
@@ -216,10 +216,10 @@ void drawDebugPanel(const harrowmere::WorldView&    world,
             for (const auto& s : signals.entries) {
                 const char* kindStr = "?";
                 switch (s.kind) {
-                    case harrowmere::PlayerSignalKind::Investigated: kindStr = "INVESTIGATED"; break;
-                    case harrowmere::PlayerSignalKind::Wanted:        kindStr = "WANTED"; break;
-                    case harrowmere::PlayerSignalKind::Poster:        kindStr = "POSTER"; break;
-                    case harrowmere::PlayerSignalKind::Greeting:      kindStr = "GREETING"; break;
+                    case harrowmere::views::PlayerSignalKind::Investigated: kindStr = "INVESTIGATED"; break;
+                    case harrowmere::views::PlayerSignalKind::Wanted:        kindStr = "WANTED"; break;
+                    case harrowmere::views::PlayerSignalKind::Poster:        kindStr = "POSTER"; break;
+                    case harrowmere::views::PlayerSignalKind::Greeting:      kindStr = "GREETING"; break;
                 }
                 ImGui::Text("[%s] %s", kindStr, s.text.c_str());
             }

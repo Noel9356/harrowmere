@@ -152,8 +152,9 @@ public:
     virtual std::vector<TerritoryDesc> territories() const = 0;
 
     // Primary weather at the viewing region (camera/player region). Drives
-    // the global sky tint.
-    virtual WeatherState primaryWeather() const = 0;
+    // the global sky tint. The kind is task 3.8's Weather enum (the ordinal
+    // Region::weather.kind carries; weatherFromKind() decodes it).
+    virtual world::Weather primaryWeather() const = 0;
 };
 
 // Clock view: dayPhase01 in [0, 1) within the game day (0 = midnight,
@@ -201,7 +202,7 @@ private:
 
     float                territoryMarkerHeight(TerritoryType t) const;
     std::array<float, 3> territoryMarkerTint(TerritoryType t) const;
-    std::array<float, 3> skyTintFor(WeatherState w) const;
+    std::array<float, 3> skyTintFor(world::Weather w) const;
 
     WorldViewForBridge& world_;
     ClockViewForBridge& clock_;
@@ -226,7 +227,7 @@ private:
     // Sun update hysteresis: -1.0 forces the first frame to push.
     double last_sun_phase_ = -1.0;
     // Weather-state hysteresis: COUNT forces the first frame to push.
-    WeatherState last_sky_weather_ = WeatherState::COUNT;
+    world::Weather last_sky_weather_ = world::Weather::COUNT;
 
     bool sun_updated_last_frame_      = false;
     bool sky_tint_updated_last_frame_ = false;

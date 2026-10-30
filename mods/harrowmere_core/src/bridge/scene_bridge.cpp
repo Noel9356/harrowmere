@@ -151,7 +151,7 @@ void SceneBridge::updateSunIfPhaseChanged() {
 }
 
 void SceneBridge::updateSkyTintIfWeatherChanged() {
-    const WeatherState w = world_.primaryWeather();
+    const world::Weather w = world_.primaryWeather();
     if (w == last_sky_weather_) return;
 
     const std::array<float, 3> tint = skyTintFor(w);
@@ -180,22 +180,22 @@ std::array<float, 3> SceneBridge::territoryMarkerTint(TerritoryType t) const {
     }
 }
 
-std::array<float, 3> SceneBridge::skyTintFor(WeatherState w) const {
+std::array<float, 3> SceneBridge::skyTintFor(world::Weather w) const {
     // A-117: CLEAR / RAIN / STORM / SNOW. Fog is not in A-117; it falls
     // back to CLEAR (documented behavior - add an A-row if fog needs its
     // own tint).
     switch (w) {
-        case WeatherState::CLEAR:
+        case world::Weather::CLEAR:
             return SKY_TINT_CLEAR;
-        case WeatherState::RAIN:
+        case world::Weather::RAIN:
             return { SKY_TINT_CLEAR[0] * SKY_TINT_RAIN_FACTOR,
                      SKY_TINT_CLEAR[1] * SKY_TINT_RAIN_FACTOR,
                      SKY_TINT_CLEAR[2] * SKY_TINT_RAIN_FACTOR };
-        case WeatherState::STORM:
+        case world::Weather::STORM:
             return { SKY_TINT_CLEAR[0] * SKY_TINT_STORM_FACTOR,
                      SKY_TINT_CLEAR[1] * SKY_TINT_STORM_FACTOR,
                      SKY_TINT_CLEAR[2] * SKY_TINT_STORM_FACTOR };
-        case WeatherState::SNOW:
+        case world::Weather::SNOW:
             return { SKY_TINT_CLEAR[0] * SKY_TINT_SNOW_FACTOR,
                      SKY_TINT_CLEAR[1] * SKY_TINT_SNOW_FACTOR,
                      SKY_TINT_CLEAR[2] * SKY_TINT_SNOW_FACTOR };

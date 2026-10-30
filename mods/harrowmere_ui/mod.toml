@@ -20,6 +20,6 @@ provides = ["ui.harrowmere"]           # the UI mod's own capability; the panels
 # (common.md section 4.0); in the game assembly this mod's own
 # renderer.vulkan.overlay requirement pulls the renderer module, so the probe
 # resolves in every real run.
-optional_capabilities = ["renderer"]
-config_keys = []
+optional_capabilities = ["renderer", "window"]  # the camera rig + the ImGui platform backend's GLFW handle: degrade-if-absent (common.md section 4.0)
+config_keys = ["harrowmere_ui.key"]  # the F1 toggle (7.3P1); a missing key falls back to F1
 requires = []

@@ -24,12 +24,12 @@
 using namespace harrowmere::bridge;
 
 // The bridge's interfaces reference game types that live in the enclosing
-// `harrowmere` namespace (Position, territoryId, TerritoryType, WeatherState).
+// `harrowmere` namespace (Position, territoryId, TerritoryType, Weather).
 // Bring them in for the fakes.
 using harrowmere::Position;
 using harrowmere::territoryId;
 using harrowmere::TerritoryType;
-using harrowmere::WeatherState;
+using harrowmere::world::Weather;
 
 // ---- Fakes -----------------------------------------------------------------
 
@@ -105,16 +105,16 @@ public:
                   });
     }
 
-    void setPrimaryWeather(WeatherState w) { weather_ = w; }
+    void setPrimaryWeather(Weather w) { weather_ = w; }
 
     std::vector<TerritoryDesc> territories() const override {
         return territories_;
     }
-    WeatherState primaryWeather() const override { return weather_; }
+    Weather primaryWeather() const override { return weather_; }
 
 private:
     std::vector<TerritoryDesc> territories_;
-    WeatherState               weather_ = WeatherState::CLEAR;
+    Weather               weather_ = Weather::CLEAR;
 };
 
 class FakeClock : public ClockViewForBridge {
@@ -283,7 +283,7 @@ TEST_CASE("TestBridge_SkyTintPerWeatherState") {
     SceneBridge bridge(world, clock, sink);
 
     // First frame: weather = CLEAR -> tint = SKY_TINT_CLEAR.
-    world.setPrimaryWeather(WeatherState::CLEAR);
+    world.setPrimaryWeather(Weather::CLEAR);
     bridge.onFrame();
     REQUIRE(sink.sky_calls_.size() == 1);
     CHECK(sink.sky_calls_.back()[0] == doctest::Approx(SKY_TINT_CLEAR[0]));
@@ -297,7 +297,7 @@ TEST_CASE("TestBridge_SkyTintPerWeatherState") {
     CHECK_FALSE(bridge.skyTintWasUpdatedOnLastFrame());
 
     // Storm -> CLEAR tint x 0.45 (A-117).
-    world.setPrimaryWeather(WeatherState::STORM);
+    world.setPrimaryWeather(Weather::STORM);
     bridge.onFrame();
     REQUIRE(sink.sky_calls_.size() == 2);
     CHECK(sink.sky_calls_.back()[0] ==
@@ -308,7 +308,7 @@ TEST_CASE("TestBridge_SkyTintPerWeatherState") {
           doctest::Approx(SKY_TINT_CLEAR[2] * SKY_TINT_STORM_FACTOR));
 
     // Snow -> CLEAR tint x 1.2 (A-117).
-    world.setPrimaryWeather(WeatherState::SNOW);
+    world.setPrimaryWeather(Weather::SNOW);
     bridge.onFrame();
     REQUIRE(sink.sky_calls_.size() == 3);
     CHECK(sink.sky_calls_.back()[0] ==

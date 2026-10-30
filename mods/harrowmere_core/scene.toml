@@ -7,6 +7,12 @@
 # through the scene bridge (task 7.2) driving the scene capability at runtime.
 # This package is the run's only scene claimant (the one-world rule).
 [scene]
+# The runtime marker budget: 65 territories (1 empire + 4 kingdoms + 12
+# cities + 48 villages) + 4 safe-zone discs + the static backdrop objects -
+# the module default (32) cannot hold the 7.2P1 markers, so the world claim
+# raises it (scene.max_objects is the scene module's declared key; hard
+# ceiling 256).
+max_objects = 128
 sky_radiance = [0.20, 0.27, 0.38]
 
 [scene.camera]

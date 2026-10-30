@@ -37,8 +37,12 @@ add_library(harrowmere_core_objects OBJECT
     src/world/world.cpp
     # task 1.5 - world generation from seed
     src/world/worldgen.cpp
+    # task 1.6 - the spatial index (A-39 uniform grid)
+    src/world/spatial_grid.cpp
     # task 3.8 - the regional season clock + weather state machine
     src/world/seasons.cpp
+    # task 7.2P1 - the static scene bridge (frame-coupled presentation)
+    src/bridge/scene_bridge.cpp
     # task 3.10 - player control & interaction intents: the Interact gate,
     # handler registry and resolver sink (interactions), then the intent
     # queue, kinematic transform, AFK clock and action log (controller)
@@ -63,6 +67,7 @@ target_link_libraries(harrowmere_core_objects PUBLIC
     engine_capability_logging
     engine_capability_scene
     engine_capability_input
+    engine_capability_pbr # the lighting family's published header (optional probe, 7.2P1 sun seam)
 )
 
 # nlohmann_json v3.11.3 (vendored at third_party/nlohmann_json, task 0.4):
