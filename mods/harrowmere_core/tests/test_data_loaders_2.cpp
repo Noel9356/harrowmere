@@ -12,7 +12,6 @@
 // DEVIATIONS.md (common.md §1.4).
 //
 // Test harness: doctest v2.4.12 (vendored per task 0.6).
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
 #include <string>

@@ -15,8 +15,8 @@
 //   TestRng_StreamsAreIndependent             — drawing stream A doesn't move B
 //   TestRng_PinnedStreamListIsClosed          — 8 streams, exact names
 
-#include "src/core/clock.hpp"
-#include "src/core/rng.hpp"
+#include "core/clock.hpp"
+#include "core/rng.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,11 +28,10 @@
 // The game's full test harness (task 0.6) will own a single main.cpp that
 // defines this; the local standalone build puts it here so the binary has
 // an entry point.
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 
+using harrowmere::SCALE;
 using harrowmere::core::DAY_LENGTH_SECONDS;
-using harrowmere::core::RNG_SCALE;
 using harrowmere::core::SeedRng;
 using harrowmere::core::WorldClock;
 
@@ -247,11 +246,11 @@ TEST_CASE(
         CHECK(v < 10);
     }
 
-    // pct(): every result is in [0, RNG_SCALE).
+    // pct(): every result is in [0, SCALE).
     for (int i = 0; i < 10'000; ++i)
     {
         const auto v = r.pct("worldgen");
-        CHECK(v < RNG_SCALE);
+        CHECK(v < SCALE);
     }
 
     // Edge: span == 1 -> always returns lo.

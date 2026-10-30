@@ -32,17 +32,23 @@
 namespace harrowmere::core::rng
 {
 
+// The generator's 128-bit state type. harrowmere_pcg_u128 is a documented
+// GCC/Clang extension (the engine targets GCC/Clang, section 3.6); the
+// __extension__-qualified typedef exempts the alias declaration from
+// -Wpedantic so consumers compiling with -Werror stay clean.
+__extension__ typedef __uint128_t harrowmere_pcg_u128;
+
 // pcg64 — 128-bit state, 64-bit output, XSL-RR.
 //
-// Uses __uint128_t (GCC/Clang). The engine targets GCC/Clang (the engine
+// Uses harrowmere_pcg_u128 (GCC/Clang). The engine targets GCC/Clang (the engine
 // tree's `.clang-format` + clangd conventions, see common.md §3.6), so the
 // 128-bit type is available. For other compilers a uint128_t shim would be
 // required; the spec's pinned toolchain makes that an out-of-scope concern.
 class pcg64
 {
 public:
-    using state_type  = __uint128_t;
-    using stream_type = __uint128_t;
+    using state_type  = harrowmere_pcg_u128;
+    using stream_type = harrowmere_pcg_u128;
 
     // Default ctor: zero state. Must call the seeded ctor or seed() before
     // drawing — drawing from a default-constructed pcg64 is well-defined
@@ -107,7 +113,7 @@ private:
     //   state_ = state_ * multiplier + stream_
     // The 128-bit multiplier 0x2360_ED05_1FC6_5DA4_4385_DF64_9FCC_F645 is
     // O'Neill's recommended PCG-K64 constant. We split it into two 64-bit
-    // halves because __uint128_t literals are not portable.
+    // halves because harrowmere_pcg_u128 literals are not portable.
     void step() noexcept
     {
         constexpr state_type kMultHi = 0x2360ED051FC65DA4ULL;

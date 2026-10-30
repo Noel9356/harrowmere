@@ -31,10 +31,20 @@
 #include <vector>
 
 #include "core/constants.hpp" // SCALE (task 0.2)
+#include "core/types.hpp"     // id aliases + Position (task 0.2)
+#include "data/json.hpp"      // DataError (the loaders report through it)
 #include "core/enums.hpp"
 #include "data/classes.hpp"
 #include "data/items.hpp"
 #include "data/species.hpp"
+
+using harrowmere::CrimeType;
+using harrowmere::SCALE;
+using harrowmere::SkillType;
+using harrowmere::speciesId;
+using harrowmere::StatType;
+using harrowmere::SuspicionAct;
+using harrowmere::data::DataError;
 
 namespace
 {

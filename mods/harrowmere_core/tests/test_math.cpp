@@ -8,7 +8,6 @@
 // Framework: doctest (task 0.6 vendors the single header at third_party/doctest/).
 // One test binary: harrowmere_core_tests.
 
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 
 #include "core/constants.hpp"
@@ -22,8 +21,23 @@
 #include <string>
 #include <type_traits>
 
+// SCALE (A-1) lives in namespace harrowmere; the tests use it unqualified.
+using harrowmere::characterId;
+using harrowmere::factionId;
+using harrowmere::IdGenerator;
+using harrowmere::MAX_XP;
+using harrowmere::Position;
+using harrowmere::regionId;
+using harrowmere::SCALE;
+using harrowmere::speciesId;
+using harrowmere::territoryId;
+
 namespace
 {
+
+// The 128-bit oracle type (matches math.cpp's __extension__ alias; the
+// typedef exempts the declaration from -Wpedantic under -Werror).
+__extension__ typedef __int128 harrowmere_wide_i128;
 
 // --- design-source factors for TestMath_MulDiv128_ConvictMagnitude ------------
 // Named here with their Appendix A rows; they migrate into constants.hpp with
@@ -102,7 +116,7 @@ TEST_CASE(
     // The card's pinned case: a = SCALE, b = SCALE, den = 7 — 10^8 / 7, truncating.
     CHECK(mulDiv64(static_cast<std::int64_t>(SCALE), static_cast<std::int64_t>(SCALE), 7) == 14285714);
 
-    // Oracle sweep against a raw __int128 computation, across magnitudes and signs.
+    // Oracle sweep against a raw harrowmere_wide_i128 computation, across magnitudes and signs.
     const std::int64_t vals[]
         = {1, 7, 9999, 10000, 123456789, 1000000000000LL, kI64Max, -1, -7, -9999, -10000, kI64Min};
     const std::uint64_t dens[] = {1, 2, 3, 7, 10000, 999983, kU64Max};
@@ -112,11 +126,13 @@ TEST_CASE(
         {
             for (std::uint64_t d : dens)
             {
-                const __int128 p            = static_cast<__int128>(a) * static_cast<__int128>(b);
-                const __int128 q            = p / static_cast<__int128>(d); // truncates toward zero
-                const std::int64_t expected = q > static_cast<__int128>(kI64Max) ? kI64Max
-                                            : q < static_cast<__int128>(kI64Min) ? kI64Min
-                                                                                 : static_cast<std::int64_t>(q);
+                const harrowmere_wide_i128 p
+                    = static_cast<harrowmere_wide_i128>(a) * static_cast<harrowmere_wide_i128>(b);
+                const harrowmere_wide_i128 q = p / static_cast<harrowmere_wide_i128>(d); // truncates toward zero
+                const std::int64_t expected  = q > static_cast<harrowmere_wide_i128>(kI64Max) ? kI64Max
+                                             : q < static_cast<harrowmere_wide_i128>(kI64Min)
+                                                 ? kI64Min
+                                                 : static_cast<std::int64_t>(q);
                 CHECK(mulDiv64(a, b, d) == expected);
             }
         }
@@ -159,23 +175,25 @@ TEST_CASE(
     // doc's single-expression formula.
     const std::int64_t repMult   = reputationMultiplier(-MAX_REPUTATION);
     const std::int64_t debtHated = mulDiv128(twoLevelCost, zoneMultiplier(true), repMult, SCALE * SCALE);
-    const __int128 oracle
-        = static_cast<__int128>(CONVICTION_PENALTY_FACTOR) * static_cast<__int128>(cost100)
-        * static_cast<__int128>(zoneMultiplier(true)) * static_cast<__int128>(repMult)
-        / (static_cast<__int128>(SCALE) * static_cast<__int128>(SCALE) * static_cast<__int128>(SCALE));
+    const harrowmere_wide_i128 oracle
+        = static_cast<harrowmere_wide_i128>(CONVICTION_PENALTY_FACTOR) * static_cast<harrowmere_wide_i128>(cost100)
+        * static_cast<harrowmere_wide_i128>(zoneMultiplier(true)) * static_cast<harrowmere_wide_i128>(repMult)
+        / (static_cast<harrowmere_wide_i128>(SCALE) * static_cast<harrowmere_wide_i128>(SCALE)
+            * static_cast<harrowmere_wide_i128>(SCALE));
     CHECK(debtHated == static_cast<std::int64_t>(oracle));
 
     // Why mulDiv128/R3 exists (pitfall register: "Triple products in u64
     // (convict's factor*cost*zone*rep) — silent overflow"): the naive doc-order
     // product at level 100 exceeds u64 range. The helpers keep every
     // intermediate in 128 bits and stay exact.
-    const __int128 fullProduct = static_cast<__int128>(CONVICTION_PENALTY_FACTOR) * static_cast<__int128>(cost100)
-                               * static_cast<__int128>(zoneMultiplier(true)) * static_cast<__int128>(repMult);
-    CHECK(fullProduct > static_cast<__int128>(kU64Max));
+    const harrowmere_wide_i128 fullProduct
+        = static_cast<harrowmere_wide_i128>(CONVICTION_PENALTY_FACTOR) * static_cast<harrowmere_wide_i128>(cost100)
+        * static_cast<harrowmere_wide_i128>(zoneMultiplier(true)) * static_cast<harrowmere_wide_i128>(repMult);
+    CHECK(fullProduct > static_cast<harrowmere_wide_i128>(kU64Max));
     CHECK(
         fullProduct
-        == static_cast<__int128>(twoLevelCost) * static_cast<__int128>(zoneMultiplier(true))
-               * static_cast<__int128>(repMult) * static_cast<__int128>(SCALE)
+        == static_cast<harrowmere_wide_i128>(twoLevelCost) * static_cast<harrowmere_wide_i128>(zoneMultiplier(true))
+               * static_cast<harrowmere_wide_i128>(repMult) * static_cast<harrowmere_wide_i128>(SCALE)
     );
 }
 

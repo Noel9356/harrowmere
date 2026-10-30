@@ -42,13 +42,10 @@
 
 #include "rng/pcg64.hpp"
 
+#include "core/constants.hpp" // SCALE (A-1) - the one definition
+
 namespace harrowmere::core
 {
-
-// SCALE = 10'000 — common.md §3.2, Appendix A row A-1.
-// Re-declared here (as RNG_SCALE) so rng.hpp does not depend on math.hpp
-// (avoids a header cycle: math.hpp's tests will later need SeedRng).
-inline constexpr std::uint64_t RNG_SCALE = 10'000;
 
 class SeedRng
 {
@@ -76,13 +73,13 @@ public:
     // by zero when span == 0).
     std::uint32_t range(const char *stream, std::uint32_t lo, std::uint32_t hiExcl);
 
-    // Convenience for probabilities on the SCALE grid: returns [0, RNG_SCALE).
+    // Convenience for probabilities on the SCALE grid: returns [0, SCALE).
     // Equivalent to range(stream, 0, 10'000).
     std::uint32_t pct(
         const char *stream
     )
     {
-        return range(stream, 0, static_cast<std::uint32_t>(RNG_SCALE));
+        return range(stream, 0, static_cast<std::uint32_t>(SCALE));
     }
 
     // --- save / restore (task 7.1) ---

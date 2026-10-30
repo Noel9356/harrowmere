@@ -4,45 +4,89 @@
 # copies the build pattern of a module's CMakeLists (the same plugin scanner
 # loads both); the mod publishes its capability vocabulary from src/bridge/
 # exactly the way a module does.
-add_library(harrowmere_core SHARED
+#
+# Object-library shape (task 0.6's contract): every game translation unit
+# compiles exactly once, into the OBJECT library `harrowmere_core_objects`;
+# the runtime SHARED library and the unit-test binary are both built from
+# those objects. Tests therefore link compiled objects, not the mod runtime,
+# and run without the engine's plugin scanner (card 0.6's pitfall verbatim).
+add_library(harrowmere_core_objects OBJECT
     src/harrowmere_plugin.cpp
+    # task 0.2 - fixed-point math, Result, id generation
+    src/core/math.cpp
+    # task 0.3 - WorldClock + SeedRng
+    src/core/clock.cpp
+    src/core/rng.cpp
+    # task 0.4 - strict JSON layer, schema DSL, config seam
+    src/data/json.cpp
+    src/data/schema.cpp
+    src/data/config.cpp
+    # task 1.1 - species / items / classes loaders
+    src/data/species.cpp
+    src/data/items.cpp
+    src/data/classes.cpp
+    # task 1.2 - crime / laws / roles / territory templates loaders
+    src/data/crime.cpp
+    src/data/laws.cpp
+    src/data/roles.cpp
+    src/data/territory_templates.cpp
 )
 
-# The mod's own translation units include the published header from src/bridge/.
-target_include_directories(harrowmere_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/bridge")
-
-# The mod's core headers (src/core/: the pinned types, enums and the sim event
-# channels) are internal to harrowmere_core - consumers never compile against
-# them (§4.2: the capability header is the only published surface); the unit
-# tests include them directly (see tests/CMakeLists.txt).
-target_include_directories(harrowmere_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/core")
-
-target_link_libraries(harrowmere_core
-    PUBLIC engine_kernel
-    # The required capabilities' published headers (include path only): the
-    # mod compiles against the providers' types and stays free of their
-    # binaries - the implementations arrive at runtime as plugin libraries.
-    PUBLIC engine_capability_logging
-    PUBLIC engine_capability_scene
-    PUBLIC engine_capability_input
+# The game source tree: "core/..." and "data/..." include paths, the
+# published capability header in src/bridge/, and the internal core headers
+# that name "rng/pcg64.hpp" relative to src/core/.
+target_include_directories(harrowmere_core_objects PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/bridge"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core"
 )
 
-# The global Definition of Done (common.md §1.5): game targets compile with
-# warnings-as-errors. The kernel's PUBLIC warning set (-Wall -Wextra
+# The required capabilities' published headers (include path only): the mod
+# compiles against the providers' types and stays free of their binaries -
+# the implementations arrive at runtime as plugin libraries.
+target_link_libraries(harrowmere_core_objects PUBLIC
+    engine_kernel
+    engine_capability_logging
+    engine_capability_scene
+    engine_capability_input
+)
+
+# nlohmann_json v3.11.3 (vendored at third_party/nlohmann_json, task 0.4):
+# include path only, marked SYSTEM so the game's warnings-as-errors never
+# fires inside the vendor header. Game code includes it only through
+# src/data/json.hpp - the review-enforced single door (D-DATA-1).
+target_include_directories(harrowmere_core_objects SYSTEM PUBLIC
+    "${CMAKE_SOURCE_DIR}/third_party/nlohmann_json/single_include"
+)
+
+# The objects join a SHARED library; every object must be position independent
+# (the tree sets PIC globally, pinned here so the object library stands alone).
+set_target_properties(harrowmere_core_objects PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+)
+
+# The global Definition of Done (common.md section 1.5): game targets compile
+# with warnings-as-errors. The kernel's PUBLIC warning set (-Wall -Wextra
 # -Wpedantic) is inherited through engine_kernel; -Werror upgrades it on the
-# game's own translation units.
+# game's own translation units (the object library compiles them all).
 if(MSVC)
-    target_compile_options(harrowmere_core PRIVATE /W4 /WX)
+    target_compile_options(harrowmere_core_objects PRIVATE /W4 /WX)
 else()
-    target_compile_options(harrowmere_core PRIVATE -Werror)
+    target_compile_options(harrowmere_core_objects PRIVATE -Werror)
 endif()
+
+# The runtime mod library: one exported entry table, built from the shared
+# objects (exactly one compilation of each TU).
+add_library(harrowmere_core SHARED
+    $<TARGET_OBJECTS:harrowmere_core_objects>
+)
 
 # Plugin deployment: the library lands in the mod's runtime package directory
 # (runtime/mods/harrowmere_core/), where the kernel's mod discovery looks for
 # it (mod.toml entry = "harrowmere_core" -> libharrowmere_core.so / .dll).
 # PREFIX keeps one naming scheme on every platform (the module convention);
-# the $ORIGIN entries resolve sibling packages and $ORIGIN/.. the kernel and
-# GLFW runtimes in runtime/; WINDOWS_EXPORT_ALL_SYMBOLS publishes the mod's
+# the ORIGIN entries resolve sibling packages and their parent (the kernel and
+# GLFW runtimes) in runtime/; WINDOWS_EXPORT_ALL_SYMBOLS publishes the mod's
 # C++ surface across the library boundary.
 set_target_properties(harrowmere_core PROPERTIES
     PREFIX "lib"
@@ -73,20 +117,21 @@ target_include_directories(harrowmere_capability_headers INTERFACE "${CMAKE_CURR
 engine_guard_capability_header("${CMAKE_CURRENT_SOURCE_DIR}/src/bridge/harrowmere_capability.hpp")
 
 # ---- Game data ships with the package ---------------------------------------
-# All base content lives in data/ as JSON (D-DATA-1, task 0.4 fills the
-# loader); the directory ships empty (with its .gitkeep) so the packaging
-# step and the runtime layout exist from day one.
+# All base content lives in data/ as JSON (D-DATA-1): the loaders of tasks
+# 1.1/1.2 consume exactly these files at startup (1.3's DataRegistry wraps
+# them). The build copies the directory into the package so a run sees the
+# same content the repo ships.
 add_custom_command(TARGET harrowmere_core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/data"
             "${CMAKE_BINARY_DIR}/runtime/mods/harrowmere_core/data"
-    COMMENT "packaging harrowmere_core game data")
+    COMMENT "packaging harrowmere_core game data"
+)
 
 # ---- Unit tests ---------------------------------------------------------------
-# The harness nucleus lands with task 0.7 (its card's two pinned tests);
-# task 0.6 owns the full harness (test-count gate, scripts/ci.sh). The switch
-# keeps a packager's default path identical when the test binary is unwanted;
-# the vendored doctest the tests compile against lives in third_party/doctest.
+# The harness (task 0.6): one doctest binary linking harrowmere_core_objects;
+# every card's test file is registered there. The switch keeps a packager's
+# default path identical when the test binary is unwanted.
 option(HARROWMERE_CORE_BUILD_TESTS "Build the harrowmere_core unit tests" ON)
 if(HARROWMERE_CORE_BUILD_TESTS)
     add_subdirectory(tests)

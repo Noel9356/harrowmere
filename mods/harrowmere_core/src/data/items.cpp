@@ -143,12 +143,15 @@ bool ItemsLoader::load(
 
     nlohmann::json root;
     {
-        DataError loadErr{};
-        if (!loadJsonFile(jsonPath, root, loadErr))
+        // 0.4: strict load (UTF-8, no trailing garbage, no duplicate keys);
+        // the Result carries the DataError on failure.
+        const auto loaded = loadJsonFile(jsonPath);
+        if (!loaded.isOk())
         {
-            errors.push_back(loadErr);
+            errors.push_back(loaded.error());
             return false;
         }
+        root = loaded.value();
     }
 
     if (!root.is_array())

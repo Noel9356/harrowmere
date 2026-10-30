@@ -1,34 +1,28 @@
-// enums.hpp — THE closed enum lists for Harrowmere.
+// enums.hpp - THE closed enum lists for Harrowmere (task 1.1).
 //
-// ============================================================================
-//  TASK 1.1 STUB — TO BE OVERWRITTEN WHEN TASK 1.1 LANDS
-// ============================================================================
-//  This header is a faithful stub of the enum registry that task 1.1 owns
-//  (phase-1-walk.md, card 1.1). It is shipped here ONLY so that task 1.2's
-//  loaders can compile and pass their pinned tests in isolation, before
-//  task 1.1 is merged.
+// common.md section 1.4: "The docs sometimes say '...and more' for enums.
+// The full pinned enum lists are in task 1.1 - those are the lists." The
+// lists below are therefore CLOSED: extending any of them requires a
+// deviation row (section 1.4).
 //
-//  The values below mirror EXACTLY what task 1.1's spec pins:
-//    * StatusType     — bit flags (D-CHAR-1, derived; values never stored)
-//    * CooldownType   — APPEARANCE, RESPEC_STAT, RESPEC_SKILL, COUNT
-//    * StatType       — STR/DEF/AGI/INT/END/PER, COUNT
-//    * SkillType      — MELEE/ARCHERY/STEALTH/ARCANA/SURVIVAL/PERSUASION/CRAFTING/ESCAPE, COUNT
-//    * CrimeType      — MURDER/ASSAULT/THEFT/ARSON/TRESPASS/POACHING/SMUGGLING/OBSTRUCTION, COUNT
-//    * ActionType     — DAMAGE/HEALING/OBJECTIVE, COUNT
-//    * TerritoryType  — VILLAGE/CITY/KINGDOM/EMPIRE, COUNT
-//    * SocialClassId  — NONE/COMMONER/NOBLE/ROYAL, COUNT
-//    * EvidenceStatus — UNKNOWN/INVESTIGATING/WANTED/CONVICTED/ARCHIVED (no COUNT: not array-indexed)
-//    * TrustTier      — STRANGER/WATCHED/DISTRUSTED/SHUNNED
-//    * SuspicionAct   — CROUCH/UNLIT/MASKED/TRESPASS/BLOODSTAINED/FLEE (no COUNT)
+// R9 (section 3.2): every game enum that backs a sized array ends in a
+// COUNT sentinel exactly as the design docs do; sized arrays use
+// std::array with N = Enum::COUNT. EvidenceStatus, TrustTier and
+// SuspicionAct are closed lists that are never array-indexed, so they
+// carry no COUNT - exactly as the card pins them.
 //
-//  When task 1.1 lands, REPLACE this file in full. The enum tag names and
-//  enumerator order below MUST match task 1.1 exactly so the rest of the
-//  game's code keeps compiling.
-//
-//  R9 (§3.2): every game enum that backs a sized array ends in a `COUNT`
-//  sentinel exactly as the design docs do; sized arrays use
-//  `std::array<T, N>` with `N = Enum::COUNT`.
-// ============================================================================
+// Notes pinned with the lists (card 1.1):
+//   * StatusType values are DERIVED (D-CHAR-1, task 2.1) - the enum exists
+//     for hasStatus; statusFlags stores non-derived flags only.
+//   * POACHING / SMUGGLING / OBSTRUCTION close the docs' "and more" with
+//     the crimes the docs' own prose requires (poaching: unlawful kill of
+//     a non-sapient in protected territory, 4.1; smuggling: the
+//     citizen-justice rule, 4.7; obstruction: bribery failure, 4.1).
+//   * ENDURANCE / PERCEPTION are the two added stats exposure (3.8) and
+//     spotting (3.9) need; species JSON gives them multipliers (default
+//     1.0 when a row omits them).
+//   * ESCAPE backs the jail-escape skill check (4.3); CRAFTING backs
+//     recipes (2.4); ARCANA backs the mana rules (2.3, D-LORE-1).
 #pragma once
 
 #include <cstdint> // std::uint32_t
@@ -36,17 +30,15 @@
 namespace harrowmere
 {
 
-// StatusType — bit flags (D-CHAR-1, task 2.1). The enum exists for hasStatus;
-// the actual values are *derived* at runtime from event/combat/war/jail state
-// and never stored on Character.statusFlags (which holds non-derived flags
-// only). See phase-1-walk.md card 2.1 / common.md D-CHAR-1.
+// StatusType - bit flags (D-CHAR-1, task 2.1). The enum exists for
+// hasStatus; the values are derived at runtime from event/combat/war/jail
+// state and never stored as-is on Character.statusFlags.
 enum class StatusType : std::uint32_t
 {
     IN_COMBAT = 1u << 0,
     IN_EVENT  = 1u << 1,
     IN_WAR    = 1u << 2,
     ARRESTED  = 1u << 3,
-    // And more — extend only via deviation row (§1.4)
 };
 
 enum class CooldownType
@@ -54,7 +46,6 @@ enum class CooldownType
     APPEARANCE,
     RESPEC_STAT,
     RESPEC_SKILL,
-    // And more — extend only via deviation row (§1.4)
     COUNT
 };
 
@@ -121,8 +112,7 @@ enum class SocialClassId
     COUNT
 };
 
-// EvidenceStatus has no COUNT sentinel — it is never used as an array bound.
-// Pinned by justice.md / common.md task 4.x.
+// No COUNT sentinel - never used as an array bound (card 1.1).
 enum class EvidenceStatus
 {
     UNKNOWN,
@@ -140,9 +130,9 @@ enum class TrustTier
     SHUNNED
 };
 
-// SuspicionAct — pinned list of suspicion trigger acts (design reference
-// §Suspicion and Trust; suspicion.json's `act` field is one of these).
-// No COUNT sentinel — the list is closed but not array-indexed.
+// Pinned suspicion acts (design reference, Suspicion and Trust);
+// suspicion.json's act field is one of these. No COUNT sentinel - the
+// list is closed but not array-indexed.
 enum class SuspicionAct
 {
     CROUCH,

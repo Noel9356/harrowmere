@@ -9,7 +9,7 @@
 //     struct DataError { std::string file; std::string jsonPointer; std::string message; };
 //     // loadJsonFile: strict UTF-8, rejects trailing garbage, rejects
 //     // duplicate object keys, returns the parsed json or the first error.
-//     bool loadJsonFile(const std::string& path, nlohmann::json& out, DataError& err);
+//     Result<Json, DataError> loadJsonFile(const std::string& path);
 //   }
 //
 // If 0.4's exact signatures differ at merge time, adapt the two call sites
@@ -108,13 +108,15 @@ bool SpeciesLoader::load(
 
     nlohmann::json root;
     {
-        DataError loadErr{};
-        // 0.4: strict load (UTF-8, no trailing garbage, no duplicate keys).
-        if (!loadJsonFile(jsonPath, root, loadErr))
+        // 0.4: strict load (UTF-8, no trailing garbage, no duplicate keys);
+        // the Result carries the DataError on failure.
+        const auto loaded = loadJsonFile(jsonPath);
+        if (!loaded.isOk())
         {
-            errors.push_back(loadErr);
+            errors.push_back(loaded.error());
             return false;
         }
+        root = loaded.value();
     }
 
     if (!root.is_array())
@@ -252,7 +254,11 @@ bool SpeciesLoader::load(
             sd.darkvision = entry["darkvision"].get<bool>();
         }
 
-        // xenophobiaBias (optional float, default 0 → scaled 0)
+        // xenophobiaBias (optional, default 0). Authored as a RAW SCALE-grid
+        // integer in Appendix B.1 (the elf row ships 2000 = 20%): an integer
+        // input is already on the grid and is used as-is, a fractional input
+        // scales by SCALE - the 0.4 numeric policy (scaledValue), not the
+        // fraction-only scaleFloat the multipliers use.
         if (entry.contains("xenophobiaBias"))
         {
             if (!entry["xenophobiaBias"].is_number())
@@ -260,11 +266,23 @@ bool SpeciesLoader::load(
                 emitError(errors, jsonPath, ptr + "/xenophobiaBias", "'xenophobiaBias' must be a number");
                 continue;
             }
-            std::string errMsg;
-            if (!scaleFloat(entry["xenophobiaBias"].get<double>(), sd.xenophobiaBias, errMsg))
+            if (entry["xenophobiaBias"].is_number_integer())
             {
-                emitError(errors, jsonPath, ptr + "/xenophobiaBias", errMsg);
-                continue;
+                const auto raw = entry["xenophobiaBias"].get<std::int64_t>();
+                if (raw < 0 || raw > static_cast<std::int64_t>(0xFFFFFFFFu))
+                {
+                    emitError(errors, jsonPath, ptr + "/xenophobiaBias", "'xenophobiaBias' integer out of u32 range");
+                    continue;
+                }
+                sd.xenophobiaBias = static_cast<std::uint32_t>(raw);
+            } else
+            {
+                std::string errMsg;
+                if (!scaleFloat(entry["xenophobiaBias"].get<double>(), sd.xenophobiaBias, errMsg))
+                {
+                    emitError(errors, jsonPath, ptr + "/xenophobiaBias", errMsg);
+                    continue;
+                }
             }
         }
 
