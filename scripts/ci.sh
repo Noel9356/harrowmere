@@ -2,9 +2,9 @@
 # scripts/ci.sh - Harrowmere's one-command local CI (task 0.6).
 #
 #   1. configure (Release; the game targets carry warnings-as-errors)
-#   2. build (app + both mod packages + the unit-test binary)
-#   3. ctest (harrowmere_core_tests; discovery is directory-local - see
-#      mods/harrowmere_core/tests/CMakeLists.txt)
+#   2. build (app + both mod packages + the unit-test binaries)
+#   3. ctest (harrowmere_core_tests + harrowmere_ui_tests; discovery is
+#      directory-local - see each mods/<id>/tests/CMakeLists.txt)
 #   4. the engine's validate() dry run (configuration, manifests, graph,
 #      permissions - no backend), exit 0 expected
 #
@@ -23,6 +23,9 @@ cmake --build "$BUILD_DIR" --parallel
 
 echo "== harrowmere ci: ctest (harrowmere_core_tests) =="
 ctest --test-dir "$BUILD_DIR/mods/harrowmere_core/tests" --output-on-failure
+
+echo "== harrowmere ci: ctest (harrowmere_ui_tests) =="
+ctest --test-dir "$BUILD_DIR/mods/harrowmere_ui/tests" --output-on-failure
 
 echo "== harrowmere ci: engine validate dry run =="
 "$BUILD_DIR/runtime/harrowmere" --validate

@@ -162,10 +162,28 @@ title = "Harrowmere"
 #
 # [renderer]
 # exposure = 1.4
-#
-# [input.actions]
-# Semantic camera actions the free-fly controller consumes when defined
-# (camera_forward / camera_back / camera_left / camera_right / camera_up /
-# camera_down; "boost" and "release_cursor" are already wired). Absent keys
-# keep the fixed WASD bindings. Phase 1's 7.4P1 pins the game's own bindings.
-# camera_forward = "W, gamepad:LeftY"
+
+[input.actions]
+# The keyboard belongs to the PLAYER (task 7.4P1): W/A/S/D walk the character
+# (the UI mod's input mapper submits SimCommand::Move - sim-side motion),
+# LeftShift sprints, F1 toggles the overlay, and mouse-delta look is the
+# camera's. The engine's free-fly camera integration therefore keeps its
+# capture-gated mouse look (the mapper drains the cursor accumulator first on
+# the frame event and applies look through the renderer's camera pose; the
+# controller reads a settled accumulator) but loses its fixed keyboard
+# bindings: every camera axis below is pinned to GAMEPAD-ONLY controls, so on
+# a keyboard run nothing else consumes the player's keys (an unbound axis
+# would fall back to its fixed key - that fallback is exactly what this
+# section exists to disable). A gamepad run keeps a dev camera: Phase 1 has
+# no player avatar in the scene yet (card 7.2 lands it in Phase 2), so the
+# gamepad camera is the one way to fly the view while the character's walk is
+# sim-side state. release_cursor stays unpinned: its Escape fallback is a key
+# the game does not use, and Esc remains the way to hand the cursor to
+# overlay work in a dev run.
+camera_forward = "gamepad:RightTrigger"
+camera_back    = "gamepad:LeftTrigger"
+camera_left    = "gamepad:LeftX"
+camera_right   = "gamepad:RightX"
+camera_up      = "gamepad:A"
+camera_down    = "gamepad:B"
+boost          = "gamepad:LeftBumper"
