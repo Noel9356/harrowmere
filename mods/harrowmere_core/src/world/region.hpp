@@ -53,6 +53,27 @@ struct WeatherState
     std::uint64_t sinceWorldTime = 0; // worldTime when this weather began
 };
 
+// ---- Climate -----------------------------------------------------------------
+//
+// Task 1.5 stage 1 assigns every region a climate class ("temperate/forest/
+// mountain/swamp/coastal"). The design reference's Region block does not
+// carry the field, but the assignment is card-pinned work with two consumed
+// seams downstream (the single forest elven enclave, stage 6; 3.8's winter
+// migration pull toward "warmer-climate regions"), so the world model owns
+// the storage from day one — the same pattern SeasonState/WeatherState use
+// for task 3.8. The consequence-flag bits stay data-declared
+// (territory_templates.json's regionFlags) and untouched by this extension;
+// DEVIATIONS.md carries the row.
+enum class Climate : std::uint32_t
+{
+    TEMPERATE = 0,
+    FOREST,
+    MOUNTAIN,
+    SWAMP,
+    COASTAL,
+    COUNT
+};
+
 // Region — design reference §World, fields verbatim (card 1.4).
 struct Region
 {
@@ -69,6 +90,11 @@ struct Region
     // inside the mana-bearing region, so every region draws 9500..10000 at
     // worldgen (task 1.5); the field is static after generation in v1.
     std::uint32_t manaRichness = 0;
+
+    // Climate class drawn at worldgen (task 1.5 stage 1); static after
+    // generation in v1. Consumed by worldgen's elven-enclave pick and by
+    // 3.8's migration pull — see the Climate enum above.
+    Climate climate = Climate::TEMPERATE;
 
     // The regional weather/season overlay (task 3.8 advances them).
     SeasonState season{};
@@ -94,6 +120,19 @@ inline constexpr bool regionIndicesInGrid(
 {
     return xIndex >= 0 && xIndex < static_cast<std::int64_t>(REGION_GRID) && zIndex >= 0
         && zIndex < static_cast<std::int64_t>(REGION_GRID);
+}
+
+// The id -> indices decomposition (the inverse of regionIdOf): the ONE place
+// a region id becomes grid indices — worldgen's frontier-ring detection
+// (task 1.5), the spatial index's cell math (1.6) and the save schema (7.1)
+// derive coordinates from ids through here, never by re-deriving the layout
+// (D-WORLD-1: the id layout is pinned in this file and changes nowhere else).
+inline constexpr void regionIndicesOf(
+    regionId id, std::uint32_t &xIndex, std::uint32_t &zIndex
+) noexcept
+{
+    xIndex = static_cast<std::uint32_t>(id) % REGION_GRID;
+    zIndex = static_cast<std::uint32_t>(id) / REGION_GRID;
 }
 
 // The region containing world position `p`, or kNoRegion when p lies outside
@@ -123,6 +162,19 @@ inline constexpr bool isGridRegion(
 ) noexcept
 {
     return id < static_cast<regionId>(REGION_COUNT);
+}
+
+// The center point of `id`'s cell — the inverse of the position->region
+// projection above, and the ONE place a region becomes a world position
+// (worldgen's safe-zone spawn points, task 1.5 stage 4: "Position at village
+// center"; 7.2P1's territory markers). y is cosmetic and stays 0.
+inline Position regionCenter(
+    regionId id
+) noexcept
+{
+    const auto xIndex = static_cast<double>(static_cast<std::uint32_t>(id) % REGION_GRID);
+    const auto zIndex = static_cast<double>(static_cast<std::uint32_t>(id) / REGION_GRID);
+    return Position{xIndex * REGION_SIZE_M + REGION_SIZE_M / 2.0, 0.0, zIndex * REGION_SIZE_M + REGION_SIZE_M / 2.0};
 }
 
 } // namespace harrowmere::world

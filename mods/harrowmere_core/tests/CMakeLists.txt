@@ -26,6 +26,7 @@ set(HARROWMERE_TEST_SOURCES
     test_data_loaders_2.cpp      # task 1.2 - crime/laws/roles/territory/suspicion
     test_registry.cpp            # task 1.3 - DataRegistry load order + cross-refs
     test_world_laws.cpp          # task 1.4 - world model: lawsAt/socialClassOf/jurisdiction
+    test_worldgen.cpp            # task 1.5 - world generation from seed
 )
 
 add_executable(harrowmere_core_tests ${HARROWMERE_TEST_SOURCES})

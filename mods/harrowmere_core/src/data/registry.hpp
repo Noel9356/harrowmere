@@ -199,6 +199,14 @@ public:
     // Array-indexed by TerritoryType; complete() was a load requirement.
     const TerritoryTypeTemplate &territoryTemplate(TerritoryType type) const;
 
+    // The whole template set (task 1.5 reads the tree multipliers —
+    // kingdoms_per_empire / cities_per_kingdom / villages_per_city — and the
+    // regionFlags table, which the per-type accessor above cannot carry).
+    const TerritoryTemplateSet &territoryTemplates() const noexcept
+    {
+        return templates_;
+    }
+
     // The global suspicion trigger table (laws.json sets with an empty
     // `suspicion` block inherit this verbatim; per-LawSet overrides REPLACE
     // it — laws.hpp's pinned semantics).

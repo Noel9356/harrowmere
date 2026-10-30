@@ -38,4 +38,10 @@ inline constexpr std::uint32_t REGION_GRID   = 16;
 inline constexpr std::uint32_t REGION_SIZE_M = 1024;
 inline constexpr std::uint32_t REGION_COUNT  = REGION_GRID * REGION_GRID;
 
+// A-44: ADULT_YEARS = 16. The species-agnostic adult threshold (tasks 3.4
+// and 3.9): children never testify and never hold non-child roles. Task
+// 1.5's population plan draws adult ages from [ADULT_YEARS, species
+// lifespan] and clamps the `child` role under it.
+inline constexpr std::uint32_t ADULT_YEARS = 16;
+
 } // namespace harrowmere

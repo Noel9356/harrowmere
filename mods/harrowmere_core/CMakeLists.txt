@@ -35,6 +35,8 @@ add_library(harrowmere_core_objects OBJECT
     # task 1.4 - the world model: regions, territory tree, doc walks
     src/world/territory.cpp
     src/world/world.cpp
+    # task 1.5 - world generation from seed
+    src/world/worldgen.cpp
 )
 
 # The game source tree: "core/..." and "data/..." include paths, the
