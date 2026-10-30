@@ -1,11 +1,120 @@
 [
-  { "key": "captain",         "baseReportWeight": 10000, "integrityRange": [7000, 10000], "critical": true,  "priority": 9, "duties": ["command", "patrol"] },
-  { "key": "guard",           "baseReportWeight": 9000,  "integrityRange": [6000, 9000],  "critical": true,  "priority": 8, "duties": ["patrol", "arrest"] },
-  { "key": "militia_veteran", "baseReportWeight": 8000,  "integrityRange": [6000, 9000],  "critical": false, "priority": 7, "duties": ["patrol"] },
-  { "key": "vendor",          "baseReportWeight": 7000,  "integrityRange": [4000, 8000],  "critical": true,  "priority": 6, "duties": ["trade"] },
-  { "key": "healer",          "baseReportWeight": 6000,  "integrityRange": [6000, 9000],  "critical": true,  "priority": 5, "duties": ["heal"] },
-  { "key": "noble",           "baseReportWeight": 6000,  "integrityRange": [3000, 7000],  "critical": true,  "priority": 4, "duties": ["govern"] },
-  { "key": "farmer",          "baseReportWeight": 4000,  "integrityRange": [4000, 8000],  "critical": false, "priority": 3, "duties": ["farm"] },
-  { "key": "laborer",         "baseReportWeight": 4000,  "integrityRange": [4000, 8000],  "critical": false, "priority": 2, "duties": ["labor"] },
-  { "key": "child",           "baseReportWeight": 0,     "integrityRange": [0, 0],        "critical": false, "priority": 0, "duties": [], "cannotTestify": true }
+    {
+        "key": "captain",
+        "baseReportWeight": 10000,
+        "integrityRange": [
+            7000,
+            10000
+        ],
+        "critical": true,
+        "priority": 9,
+        "duties": [
+            "command",
+            "patrol"
+        ]
+    },
+    {
+        "key": "guard",
+        "baseReportWeight": 9000,
+        "integrityRange": [
+            6000,
+            9000
+        ],
+        "critical": true,
+        "priority": 8,
+        "duties": [
+            "patrol",
+            "arrest"
+        ]
+    },
+    {
+        "key": "militia_veteran",
+        "baseReportWeight": 8000,
+        "integrityRange": [
+            6000,
+            9000
+        ],
+        "critical": false,
+        "priority": 7,
+        "duties": [
+            "patrol"
+        ]
+    },
+    {
+        "key": "vendor",
+        "baseReportWeight": 7000,
+        "integrityRange": [
+            4000,
+            8000
+        ],
+        "critical": true,
+        "priority": 6,
+        "duties": [
+            "trade"
+        ]
+    },
+    {
+        "key": "healer",
+        "baseReportWeight": 6000,
+        "integrityRange": [
+            6000,
+            9000
+        ],
+        "critical": true,
+        "priority": 5,
+        "duties": [
+            "heal"
+        ]
+    },
+    {
+        "key": "noble",
+        "baseReportWeight": 6000,
+        "integrityRange": [
+            3000,
+            7000
+        ],
+        "critical": true,
+        "priority": 4,
+        "duties": [
+            "govern"
+        ]
+    },
+    {
+        "key": "farmer",
+        "baseReportWeight": 4000,
+        "integrityRange": [
+            4000,
+            8000
+        ],
+        "critical": false,
+        "priority": 3,
+        "duties": [
+            "farm"
+        ]
+    },
+    {
+        "key": "laborer",
+        "baseReportWeight": 4000,
+        "integrityRange": [
+            4000,
+            8000
+        ],
+        "critical": false,
+        "priority": 2,
+        "duties": [
+            "labor"
+        ]
+    },
+    {
+        "key": "child",
+        "baseReportWeight": 0,
+        "integrityRange": [
+            0,
+            0
+        ],
+        "critical": false,
+        "priority": 0,
+        "duties": [],
+        "cannotTestify": true
+    }
 ]

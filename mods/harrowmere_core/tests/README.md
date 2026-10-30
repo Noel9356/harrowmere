@@ -12,6 +12,7 @@ tests exist and run.
 |---|---|
 | `main.cpp` | the doctest entry point (`DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN`); test files never define it |
 | `test_events.cpp` | task 0.7's two pinned tests over the sim event channels |
+| `test_seasons.cpp` | task 3.8's two pinned tests (`TestSeasons_CycleLengthAndOrder`, `TestWeather_MarkovStaysInTable`) + the cadence/determinism rules, the year fast-forward, and the frozen hook signatures (see `src/world/README.md`, "Seasons & weather") |
 | `CMakeLists.txt` | the target: links the kernel (event bus headers + lib), compiles `../src/core/` headers, registers with ctest |
 
 The target links the kernel and compiles the mod's headers directly - tests

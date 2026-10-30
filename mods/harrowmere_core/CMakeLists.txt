@@ -37,6 +37,8 @@ add_library(harrowmere_core_objects OBJECT
     src/world/world.cpp
     # task 1.5 - world generation from seed
     src/world/worldgen.cpp
+    # task 3.8 - the regional season clock + weather state machine
+    src/world/seasons.cpp
 )
 
 # The game source tree: "core/..." and "data/..." include paths, the

@@ -177,6 +177,22 @@ inline Position regionCenter(
     return Position{xIndex * REGION_SIZE_M + REGION_SIZE_M / 2.0, 0.0, zIndex * REGION_SIZE_M + REGION_SIZE_M / 2.0};
 }
 
+// Squared distance between two positions on the world plane, in metres^2 —
+// the flat-plane distance primitive of the D-WORLD-1 seam (task 3.8's
+// shelter check is the first consumer; the spatial index (1.6) and the LOD
+// tiers (3.5) route theirs through here too, never raw coordinate math, so
+// a spherical projection can replace the flat one by touching this file).
+// x/z only: y is cosmetic (card 1.6). R5: distances compare as f64; the
+// caller squares its threshold instead of paying a sqrt here.
+inline double distanceSquaredM(
+    const Position &a, const Position &b
+) noexcept
+{
+    const double dx = a.x - b.x;
+    const double dz = a.z - b.z;
+    return dx * dx + dz * dz;
+}
+
 } // namespace harrowmere::world
 
 #endif // HARROWMERE_CORE_WORLD_REGION_HPP

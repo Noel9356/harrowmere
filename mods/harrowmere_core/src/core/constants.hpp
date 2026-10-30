@@ -44,4 +44,52 @@ inline constexpr std::uint32_t REGION_COUNT  = REGION_GRID * REGION_GRID;
 // lifespan] and clamps the `child` role under it.
 inline constexpr std::uint32_t ADULT_YEARS = 16;
 
+// ---- task 3.8: seasons & weather (Appendix A.6) -------------------------------
+
+// A-51: SEASON_LENGTH_GAME_DAYS = 30. One season per game-month; the four
+// seasons cycle spring -> summer -> autumn -> winter (card 3.8). The
+// seconds form below is the single conversion the season clock uses
+// (SEASON_LENGTH_GAME_DAYS x A-3's 86'400 game seconds per game day,
+// core/clock.hpp's DAY_LENGTH_SECONDS — the derivation is kept literal so
+// constants.hpp stays a leaf header; test_seasons.cpp static_asserts the
+// two forms agree).
+inline constexpr std::uint32_t SEASON_LENGTH_GAME_DAYS    = 30;
+inline constexpr std::uint64_t SEASON_LENGTH_GAME_SECONDS = 30ull * 86'400ull;
+
+// A-3 derived: the game hour (86'400 / 24 = 3'600 game seconds). The
+// weather machine rolls on the game-hour cadence (card 3.8: "weather per
+// region per game-hour"), never on the wall clock (R8).
+inline constexpr std::uint64_t GAME_HOUR_SECONDS = 3'600ull;
+
+// A-52 (season half): farmer-duty yield multipliers on the SCALE grid —
+// spring 1.0, summer 1.2, autumn 0.8, winter 0.3. Winter famines drive
+// migration (the design reference's doc hook).
+inline constexpr std::uint32_t SEASON_YIELD_SPRING = 10'000;
+inline constexpr std::uint32_t SEASON_YIELD_SUMMER = 12'000;
+inline constexpr std::uint32_t SEASON_YIELD_AUTUMN = 8'000;
+inline constexpr std::uint32_t SEASON_YIELD_WINTER = 3'000;
+
+// A-52 (weather half): weather yield multipliers on the SCALE grid — storm
+// 0.7, rain 1.1; every other weather state carries no modifier (SCALE).
+inline constexpr std::uint32_t WEATHER_YIELD_STORM = 7'000;
+inline constexpr std::uint32_t WEATHER_YIELD_RAIN  = 11'000;
+
+// A-53: EXPOSURE_DPS = 2 hp/tick. Exposure damage taken per tick by every
+// NEAR character unsheltered in a storm/snow region (card 3.8); ~3 min
+// unsheltered in a storm is ~10% of a fresh player's HP. Applied ONLY
+// through the damage path (applyDamage, source = 0 environment) so deaths
+// route through 3.3's onEnvironmentDeath single path.
+inline constexpr std::uint32_t EXPOSURE_DPS = 2;
+
+// D-SHELTER-1: shelter = within 50 m of a building marker; "settlement
+// center = sheltered in v1" (card 3.8). Distance compares as f64 (R5).
+inline constexpr double SHELTER_RADIUS_M = 50.0;
+
+// Card 3.8 Spec: "winter adds pull toward warmer-climate regions (+1000)".
+// The SCALE-grid pull bonus the migration system (3.4) adds for a candidate
+// region in winter. Not yet an Appendix A row (the value is card-pinned,
+// the warmth set is 3.8's reading — see DEVIATIONS.md 2026-10-30); awaits
+// Appendix A promotion like worldgen's pinned climate weights.
+inline constexpr std::uint32_t MIGRATION_WINTER_PULL = 1'000;
+
 } // namespace harrowmere

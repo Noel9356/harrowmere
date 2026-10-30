@@ -8,10 +8,11 @@ downstream (justice, events, war, UI) reads it through here.
 
 | File | Role |
 |---|---|
-| `region.hpp` | `Region` (design reference §World, fields verbatim) + `SeasonState`/`WeatherState` (owned by task 3.8, declared here) + the `Climate` class drawn at worldgen (1.5) + the **D-WORLD-1 projection**: `regionIdAt`/`regionIdOf`/`regionIndicesInGrid`/`isGridRegion`/`regionCenter` — the ONE place world coordinates and region indices meet. |
+| `region.hpp` | `Region` (design reference §World, fields verbatim) + `SeasonState`/`WeatherState` (owned by task 3.8, declared here) + the `Climate` class drawn at worldgen (1.5) + the **D-WORLD-1 projection**: `regionIdAt`/`regionIdOf`/`regionIndicesInGrid`/`isGridRegion`/`regionCenter`/`distanceSquaredM` — the ONE place world coordinates and region indices meet. |
 | `territory.hpp/.cpp` | `Territory` (design reference §Territories, fields verbatim + the card's `region`/`lawless` pins), `CompactRecord` (the archive row 4.1 produces / 4.2 burns), and the `isSovereign`/`isUnclaimed` predicates (design rule, decided once). |
 | `world.hpp/.cpp` | `WorldStore`: the graph storage (all `std::map`, R7), the generation surface (`addRegion`, `addTerritory`, `setRegionTerritory`, `clear`), the three doc walks, and the parent/child traversal helpers 4.x/6.x consume. |
 | `worldgen.hpp/.cpp` | Task 1.5: `generateWorld(seed, DataRegistry, WorldStore&, NpcSeedOut&)` — the seven pinned generation stages, the `NpcSeed`/`FactionSeed` plan records, the safe-zone spawn derivation, and the FNV-1a summary hash. |
+| `seasons.hpp/.cpp` | Task 3.8: the season clock + the weather markov machine that advance `Region`'s `SeasonState`/`WeatherState`, and the four frozen effect hooks (crop yields, migration pull, event weather-affinity, exposure). See the section below. |
 
 ## Worldgen (task 1.5)
 
@@ -40,6 +41,29 @@ player spawn, the single forest elven enclave, and `nextCharacterId` — the
 character id space after the plan, which the runtime adopts so spawn-path
 and player ids continue the same sequence (7.1 persists it; D-WGEN-1: the
 outputs are fully persisted, loading a save never re-generates).
+
+## Seasons & weather (task 3.8)
+
+`seasons.hpp/.cpp` advances the `SeasonState`/`WeatherState` the region
+carries, and freezes the four effect hooks the design reference names
+("seasons and weather are regionally dynamic... crop yields, NPC migration,
+event probabilities, and exposure risk"):
+
+| Piece | Contract |
+|---|---|
+| Season clock | Pure worldTime math (no RNG): `seasonAt(t)` walks the pinned spring→summer→autumn→winter cycle at `SEASON_LENGTH_GAME_SECONDS` (A-51 = 30 game-days); `updateSeasons(store, worldTime)` writes every region's index + `startedAtWorldTime` (the exact A-51 boundary) in ascending id order, dirtying nothing on a no-transition tick. |
+| Weather machine | A markov roll per region per game-hour on the pinned `weather` stream (R6/R8), one `pct()` draw per region per roll in ascending regionId order (R7). The cadence IS the worldTime pair of the slice — no roll-counter state to persist (7.1). Card table: clear 60 / rain 25 / storm 10 / fog 5; winter swaps rain→snow wholesale; swamp +fog 2500; mountain +snow 1500 (deltas 3.8-pinned, DEVIATIONS.md). `sinceWorldTime` stamps the crossed hour boundary on a kind change. |
+| Phase-1 wiring | No Scheduler in Phase 1: `tickSeasonsAndWeather(clock, store, rng)` composes one fixed-update slice in the §4.4 order (clock advance → season roll → weather). 3.1 (Phase 2) re-registers `updateSeasons`/`updateWeather` into steps 0/2 — re-registration, not a rewrite. |
+| Hook 1 — crop yields → 3.4 | `cropYieldMultiplier(season, weather)` (A-52 product; season 10000/12000/8000/3000 × weather storm 7000 / rain 11000, others unmodified). |
+| Hook 2 — migration → 3.4 | `migrationClimatePull(season, climate)`: winter adds `MIGRATION_WINTER_PULL` (1000) for the warm climates (coastal, temperate — the 3.8-pinned warmth reading, DEVIATIONS.md). |
+| Hook 3 — event probabilities → 5.1 | `weatherModifier(weather, weatherAffinity)`: the template's `"weatherAffinity": { "storm": 2000 }` map (keys = `weatherKey()`), SCALE-grid bonus for the spawn roll. |
+| Hook 4 — exposure → 3.3/3.4 (Phase 2) | `exposureActive` (storm/snow) + `exposureDamagePerTick()` (A-53 = 2 hp/tick) + `isSheltered` (D-SHELTER-1, 50 m of the settlement center, inclusive) + the `applyExposure(region, near, anchor, applyDamage)` sweep — damage rides the one `applyDamage` path with source = 0 so deaths route to `onEnvironmentDeath` (3.3). Nothing calls it in Phase 1. |
+
+Tests: `tests/test_seasons.cpp` — the two pinned cases
+(`TestSeasons_CycleLengthAndOrder`, `TestWeather_MarkovStaysInTable`) plus
+the cadence/determinism rules, the card's Done-when year fast-forward
+(365 game-days over the full 256-region grid, 12 transitions exactly on the
+A-51 boundaries), and the frozen hook signatures proven against fakes.
 
 ## The three doc walks (`D-JUR-1` — implemented once, here)
 
@@ -83,7 +107,9 @@ regions spanning `[0, 16384)²` metres. The id layout is
 ## Deliberate seams (do not build past them)
 
 - `SeasonState`/`WeatherState`: task 3.8 owns the state machines that
-  advance them; the world model only owns the storage.
+  advance them — now landed in `seasons.hpp/.cpp` (the ordinal vocabularies,
+  the two fixed-update slices, the four effect hooks); the world model only
+  owns the storage.
 - `Climate`: worldgen (1.5) assigns it; 3.8's winter migration pull and the
   enclave pick consume it. The consequence-flag BITS stay data-declared
   (territory_templates.json's regionFlags) — climate is an enum field, not a
@@ -95,7 +121,9 @@ regions spanning `[0, 16384)²` metres. The id layout is
 - `lawless`: task 4.6 sets it (`A-96 LAWLESS_AFTER_DAYS`); the world model
   only carries the flag.
 
-Tests: `tests/test_world_laws.cpp` (card 1.4's six pinned tests) and
+Tests: `tests/test_world_laws.cpp` (card 1.4's six pinned tests),
 `tests/test_worldgen.cpp` (card 1.5's five pinned tests + the structural
 rules: tree shape, frontier ring, contiguous city blocks, title chain,
-factions, enclave, rare-species bound, variance cap, the 2 s budget).
+factions, enclave, rare-species bound, variance cap, the 2 s budget), and
+`tests/test_seasons.cpp` (card 3.8's two pinned tests + the cadence,
+determinism, year fast-forward and frozen-hook cases).

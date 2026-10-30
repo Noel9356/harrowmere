@@ -1,110 +1,110 @@
 [
-  {
-    "id": 1,
-    "key": "commoner",
-    "statWeights": {
-      "STRENGTH": 1.0,
-      "DEFENCE": 1.0,
-      "AGILITY": 1.0,
-      "INTELLIGENCE": 1.0,
-      "ENDURANCE": 1.0,
-      "PERCEPTION": 1.0
+    {
+        "id": 1,
+        "key": "commoner",
+        "statWeights": {
+            "STRENGTH": 1.0,
+            "DEFENCE": 1.0,
+            "AGILITY": 1.0,
+            "INTELLIGENCE": 1.0,
+            "ENDURANCE": 1.0,
+            "PERCEPTION": 1.0
+        },
+        "skillWeights": {},
+        "startingSkills": {}
     },
-    "skillWeights": {},
-    "startingSkills": {}
-  },
-  {
-    "id": 2,
-    "key": "warrior",
-    "statWeights": {
-      "STRENGTH": 1.4,
-      "DEFENCE": 1.3,
-      "AGILITY": 0.9,
-      "INTELLIGENCE": 0.7,
-      "ENDURANCE": 1.2,
-      "PERCEPTION": 0.8
+    {
+        "id": 2,
+        "key": "warrior",
+        "statWeights": {
+            "STRENGTH": 1.4,
+            "DEFENCE": 1.3,
+            "AGILITY": 0.9,
+            "INTELLIGENCE": 0.7,
+            "ENDURANCE": 1.2,
+            "PERCEPTION": 0.8
+        },
+        "skillWeights": {
+            "MELEE": 1.5
+        },
+        "startingSkills": {
+            "MELEE": 3
+        }
     },
-    "skillWeights": {
-      "MELEE": 1.5
+    {
+        "id": 3,
+        "key": "scholar",
+        "statWeights": {
+            "STRENGTH": 0.7,
+            "DEFENCE": 0.9,
+            "AGILITY": 0.9,
+            "INTELLIGENCE": 1.5,
+            "ENDURANCE": 0.8,
+            "PERCEPTION": 1.2
+        },
+        "skillWeights": {
+            "ARCANA": 1.5
+        },
+        "startingSkills": {
+            "ARCANA": 3
+        }
     },
-    "startingSkills": {
-      "MELEE": 3
+    {
+        "id": 4,
+        "key": "ranger",
+        "statWeights": {
+            "STRENGTH": 1.0,
+            "DEFENCE": 0.9,
+            "AGILITY": 1.4,
+            "INTELLIGENCE": 1.0,
+            "ENDURANCE": 1.1,
+            "PERCEPTION": 1.4
+        },
+        "skillWeights": {
+            "ARCHERY": 1.5,
+            "SURVIVAL": 1.3
+        },
+        "startingSkills": {
+            "ARCHERY": 3,
+            "SURVIVAL": 2
+        }
+    },
+    {
+        "id": 5,
+        "key": "rogue",
+        "statWeights": {
+            "STRENGTH": 0.9,
+            "DEFENCE": 0.8,
+            "AGILITY": 1.5,
+            "INTELLIGENCE": 1.1,
+            "ENDURANCE": 0.9,
+            "PERCEPTION": 1.2
+        },
+        "skillWeights": {
+            "STEALTH": 1.5,
+            "ESCAPE": 1.2
+        },
+        "startingSkills": {
+            "STEALTH": 3,
+            "ESCAPE": 1
+        }
+    },
+    {
+        "id": 6,
+        "key": "artisan",
+        "statWeights": {
+            "STRENGTH": 1.1,
+            "DEFENCE": 1.0,
+            "AGILITY": 1.0,
+            "INTELLIGENCE": 1.1,
+            "ENDURANCE": 1.1,
+            "PERCEPTION": 1.0
+        },
+        "skillWeights": {
+            "CRAFTING": 1.6
+        },
+        "startingSkills": {
+            "CRAFTING": 3
+        }
     }
-  },
-  {
-    "id": 3,
-    "key": "scholar",
-    "statWeights": {
-      "STRENGTH": 0.7,
-      "DEFENCE": 0.9,
-      "AGILITY": 0.9,
-      "INTELLIGENCE": 1.5,
-      "ENDURANCE": 0.8,
-      "PERCEPTION": 1.2
-    },
-    "skillWeights": {
-      "ARCANA": 1.5
-    },
-    "startingSkills": {
-      "ARCANA": 3
-    }
-  },
-  {
-    "id": 4,
-    "key": "ranger",
-    "statWeights": {
-      "STRENGTH": 1.0,
-      "DEFENCE": 0.9,
-      "AGILITY": 1.4,
-      "INTELLIGENCE": 1.0,
-      "ENDURANCE": 1.1,
-      "PERCEPTION": 1.4
-    },
-    "skillWeights": {
-      "ARCHERY": 1.5,
-      "SURVIVAL": 1.3
-    },
-    "startingSkills": {
-      "ARCHERY": 3,
-      "SURVIVAL": 2
-    }
-  },
-  {
-    "id": 5,
-    "key": "rogue",
-    "statWeights": {
-      "STRENGTH": 0.9,
-      "DEFENCE": 0.8,
-      "AGILITY": 1.5,
-      "INTELLIGENCE": 1.1,
-      "ENDURANCE": 0.9,
-      "PERCEPTION": 1.2
-    },
-    "skillWeights": {
-      "STEALTH": 1.5,
-      "ESCAPE": 1.2
-    },
-    "startingSkills": {
-      "STEALTH": 3,
-      "ESCAPE": 1
-    }
-  },
-  {
-    "id": 6,
-    "key": "artisan",
-    "statWeights": {
-      "STRENGTH": 1.1,
-      "DEFENCE": 1.0,
-      "AGILITY": 1.0,
-      "INTELLIGENCE": 1.1,
-      "ENDURANCE": 1.1,
-      "PERCEPTION": 1.0
-    },
-    "skillWeights": {
-      "CRAFTING": 1.6
-    },
-    "startingSkills": {
-      "CRAFTING": 3
-    }
-  }
 ]

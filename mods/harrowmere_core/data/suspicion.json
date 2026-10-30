@@ -1,8 +1,48 @@
 [
-  { "act": "CROUCH",       "masks": ["SETTLEMENT", "MARKET"],           "weight": 2000 },
-  { "act": "UNLIT",        "masks": ["NIGHT", "SETTLEMENT"],            "weight": 2500 },
-  { "act": "MASKED",       "masks": ["SETTLEMENT", "MARKET"],           "weight": 5000 },
-  { "act": "TRESPASS",     "masks": ["PRIVATE_PROPERTY"],               "weight": 4000 },
-  { "act": "BLOODSTAINED", "masks": ["SETTLEMENT"],                     "weight": 6000 },
-  { "act": "FLEE",         "masks": ["SETTLEMENT", "NIGHT"],            "weight": 3000 }
+    {
+        "act": "CROUCH",
+        "masks": [
+            "SETTLEMENT",
+            "MARKET"
+        ],
+        "weight": 2000
+    },
+    {
+        "act": "UNLIT",
+        "masks": [
+            "NIGHT",
+            "SETTLEMENT"
+        ],
+        "weight": 2500
+    },
+    {
+        "act": "MASKED",
+        "masks": [
+            "SETTLEMENT",
+            "MARKET"
+        ],
+        "weight": 5000
+    },
+    {
+        "act": "TRESPASS",
+        "masks": [
+            "PRIVATE_PROPERTY"
+        ],
+        "weight": 4000
+    },
+    {
+        "act": "BLOODSTAINED",
+        "masks": [
+            "SETTLEMENT"
+        ],
+        "weight": 6000
+    },
+    {
+        "act": "FLEE",
+        "masks": [
+            "SETTLEMENT",
+            "NIGHT"
+        ],
+        "weight": 3000
+    }
 ]

@@ -1,10 +1,58 @@
 [
-  { "type": "MURDER",      "lethalForce": true,  "severity": 9000, "notorietyGain": 6000, "defaultThreshold": 7000 },
-  { "type": "ASSAULT",     "lethalForce": false, "severity": 4000, "notorietyGain": 3000, "defaultThreshold": 6000 },
-  { "type": "THEFT",       "lethalForce": false, "severity": 2000, "notorietyGain": 2000, "defaultThreshold": 5000 },
-  { "type": "ARSON",       "lethalForce": false, "severity": 6000, "notorietyGain": 4000, "defaultThreshold": 6000 },
-  { "type": "TRESPASS",    "lethalForce": false, "severity": 1000, "notorietyGain": 1500, "defaultThreshold": 4000 },
-  { "type": "POACHING",    "lethalForce": false, "severity": 1500, "notorietyGain": 1500, "defaultThreshold": 5000 },
-  { "type": "SMUGGLING",   "lethalForce": false, "severity": 3000, "notorietyGain": 2500, "defaultThreshold": 5000 },
-  { "type": "OBSTRUCTION", "lethalForce": false, "severity": 3000, "notorietyGain": 3000, "defaultThreshold": 5000 }
+    {
+        "type": "MURDER",
+        "lethalForce": true,
+        "severity": 9000,
+        "notorietyGain": 6000,
+        "defaultThreshold": 7000
+    },
+    {
+        "type": "ASSAULT",
+        "lethalForce": false,
+        "severity": 4000,
+        "notorietyGain": 3000,
+        "defaultThreshold": 6000
+    },
+    {
+        "type": "THEFT",
+        "lethalForce": false,
+        "severity": 2000,
+        "notorietyGain": 2000,
+        "defaultThreshold": 5000
+    },
+    {
+        "type": "ARSON",
+        "lethalForce": false,
+        "severity": 6000,
+        "notorietyGain": 4000,
+        "defaultThreshold": 6000
+    },
+    {
+        "type": "TRESPASS",
+        "lethalForce": false,
+        "severity": 1000,
+        "notorietyGain": 1500,
+        "defaultThreshold": 4000
+    },
+    {
+        "type": "POACHING",
+        "lethalForce": false,
+        "severity": 1500,
+        "notorietyGain": 1500,
+        "defaultThreshold": 5000
+    },
+    {
+        "type": "SMUGGLING",
+        "lethalForce": false,
+        "severity": 3000,
+        "notorietyGain": 2500,
+        "defaultThreshold": 5000
+    },
+    {
+        "type": "OBSTRUCTION",
+        "lethalForce": false,
+        "severity": 3000,
+        "notorietyGain": 3000,
+        "defaultThreshold": 5000
+    }
 ]
