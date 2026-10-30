@@ -28,6 +28,7 @@ set(HARROWMERE_TEST_SOURCES
     test_world_laws.cpp          # task 1.4 - world model: lawsAt/socialClassOf/jurisdiction
     test_worldgen.cpp            # task 1.5 - world generation from seed
     test_seasons.cpp             # task 3.8 - the season clock + weather machine
+    test_player_control.cpp      # task 3.10 - intents, kinematic transform, AFK, action log
 )
 
 add_executable(harrowmere_core_tests ${HARROWMERE_TEST_SOURCES})

@@ -92,4 +92,33 @@ inline constexpr double SHELTER_RADIUS_M = 50.0;
 // Appendix A promotion like worldgen's pinned climate weights.
 inline constexpr std::uint32_t MIGRATION_WINTER_PULL = 1'000;
 
+// ---- task 3.10: player control & interaction intents (Appendix A.4) -----------
+
+// A-57: MOVE_SPEED_MPS = 4 (sprint x2). The kinematic walk speed in metres
+// per real second (card 3.10: "kinematic walk (MOVE_SPEED_MPS = 4, A-57)").
+// Consumed ONLY by the player controller's fixed-update integration
+// (Position math, R5's carve-out) — a sprinting player moves at 8 m/s. The
+// sprint cost (rest need) arrives with 2.1's player mirror; Phase 1 sprints
+// free, per the card.
+inline constexpr double MOVE_SPEED_MPS     = 4.0;
+inline constexpr double MOVE_SPRINT_FACTOR = 2.0; // A-57's "(sprint ×2)"
+
+// A-58: AFK_TIMEOUT_REAL_S = 120 real seconds. D-AFK-1: no UI intents for
+// 120 real seconds -> afk = true until the next intent; 4.5 exempts AFK
+// states from suspicion acts and 6.3 stops abandonment credit. REAL seconds
+// (D-TIME-1: AFK detection is one of the three real-time doc rules) — the
+// controller compares against WorldClock.realTime, never worldTime (R8).
+inline constexpr std::uint64_t AFK_TIMEOUT_REAL_S = 120;
+
+// Card 3.10: "Interactions by proximity + target type". The interaction
+// range — the gate every Interact{target, action} intent must pass — is not
+// pinned by any Appendix A row (no number exists in the card, the design
+// reference, or Appendix A for it), so 3.10 pins it here pending Appendix A
+// promotion (the same pattern as MIGRATION_WINTER_PULL above; DEVIATIONS.md
+// 2026-10-30 carries the row). 3 m is a touch/talk reach: strictly inside
+// every pinned social radius (A-55 IDENTIFY_RANGE_M 15, A-60 WITNESS_RADIUS
+// 30, A-26 CONSENT_BROADCAST_M 50), so everything an interaction can touch
+// also saw it happen. Boundary inclusive, compared on the x/z plane (R5).
+inline constexpr double INTERACT_RANGE_M = 3.0;
+
 } // namespace harrowmere

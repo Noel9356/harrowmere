@@ -39,6 +39,11 @@ add_library(harrowmere_core_objects OBJECT
     src/world/worldgen.cpp
     # task 3.8 - the regional season clock + weather state machine
     src/world/seasons.cpp
+    # task 3.10 - player control & interaction intents: the Interact gate,
+    # handler registry and resolver sink (interactions), then the intent
+    # queue, kinematic transform, AFK clock and action log (controller)
+    src/player/interactions.cpp
+    src/player/controller.cpp
 )
 
 # The game source tree: "core/..." and "data/..." include paths, the
