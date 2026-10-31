@@ -100,6 +100,22 @@ add_library(harrowmere_core SHARED
     $<TARGET_OBJECTS:harrowmere_core_objects>
 )
 
+# $<TARGET_OBJECTS> carries the object files and nothing else: an object
+# library's link dependencies do NOT flow through it (only the
+# target_link_libraries form propagates them, which is why the test binary
+# below resolves kernel symbols and this library, before the fix, did not).
+# The runtime library therefore links the kernel itself - the objects call
+# non-inline kernel functions (ComponentContext::configuration*InSection,
+# executableDirectory, prettifyChannelName). On ELF systems those references
+# used to survive the link undefined and resolve at load time through the
+# plugin RPATH ($ORIGIN/.. -> runtime/, where libengine_kernel.so sits);
+# MinGW resolves every symbol at link time and needs the kernel's import
+# library on the link line, or the DLL fails with undefined references
+# (found on Windows: harrowmere_plugin.cpp.obj, ld exit 1). PUBLIC mirrors
+# the module plugins' link pattern (engine_kernel is this tree's one shared
+# library every plugin binds to).
+target_link_libraries(harrowmere_core PUBLIC engine_kernel)
+
 # Plugin deployment: the library lands in the mod's runtime package directory
 # (runtime/mods/harrowmere_core/), where the kernel's mod discovery looks for
 # it (mod.toml entry = "harrowmere_core" -> libharrowmere_core.so / .dll).

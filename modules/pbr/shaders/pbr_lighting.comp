@@ -158,10 +158,23 @@ void main()
     // blocks speckled over exactly the curved, textured objects. When the
     // offset point is inside, re-offset along the SDF's own geometric normal,
     // which is exact at the surface.
-    vec3 shadowOrigin = worldPosition + normal * 0.004;
+    //
+    // The offset also scales with the camera distance: the G-buffer world
+    // position is reconstructed through inverseViewProjection in fp32, and
+    // the ground plane is TWO TRIANGLES 16 km across - the perspective-correct
+    // depth interpolation across those giants quantizes per scanline, so the
+    // reconstructed position's error grows to metres at range. An origin that
+    // lands below the 0.02 m ground slab is outside the SDF (the
+    // inside-guard passes) but directly in the ray's path, and the upward sun
+    // ray "hits" the slab it starts under: scanline-banded black ground. The
+    // lift is 1% of the camera distance (4 mm near the camera, ~5 m at the
+    // 500 m far plane): shadow displacement stays under the marker scale at
+    // every visible range, while the origin clears the interpolation noise.
+    const float shadowOriginLift = 0.004 + 0.01 * length(cameraPosition.xyz - worldPosition);
+    vec3 shadowOrigin = worldPosition + normal * shadowOriginLift;
     if (shadows && sceneSDF(shadowOrigin, primitiveCount) < 0.0)
     {
-        shadowOrigin = worldPosition + sdfNormal(worldPosition, primitiveCount) * 0.004;
+        shadowOrigin = worldPosition + sdfNormal(worldPosition, primitiveCount) * shadowOriginLift;
     }
 
     // One fold per pixel: the analytic specular hands over to the ray traced

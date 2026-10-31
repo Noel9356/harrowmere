@@ -1160,6 +1160,18 @@ std::optional<double> ConfigurationStore::floatingValue(
     {
         return value->get();
     }
+    // TOML keeps integers and floats apart, and toml++'s get_as<double>
+    // refuses to coerce. A staged override or a hand-written file that spells
+    // a float-keyed value as an integer (`--set engine.quit_after_seconds=1`,
+    // the documented finite-run smoke shape) would otherwise read as "absent"
+    // and silently fall back to the default - a hang for the run-length key.
+    // An integer node IS a valid double value; accept it here. Loss of
+    // precision beyond 2^53 is the same rounding any double storage of the
+    // integer would take.
+    if (const auto integer = section->get_as<std::int64_t>(key))
+    {
+        return static_cast<double>(integer->get());
+    }
     return std::nullopt;
 }
 

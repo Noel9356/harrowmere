@@ -16,8 +16,16 @@ max_objects = 128
 sky_radiance = [0.20, 0.27, 0.38]
 
 [scene.camera]
+# The default far plane is the engine's 500 m demo-room default; this world
+# is 16 km across (A-40) with territory markers one region (1024 m) apart, so
+# 500 m clipped EVERY marker out of the depth range - the ground plane turned
+# into a 500 m brown disc inside a black void (the first Windows session's
+# "blue and brown with black flashes"). The far plane reaches past the plane's
+# edge so the ground runs to the horizon and neighbouring markers stay inside
+# the depth range. near stays the engine default (0.1).
 position = [24.0, 6.0, 24.0]
 look_at = [0.0, 1.0, 0.0]
+far = 20000.0
 
 [scene.sun]
 direction = [-0.4, -0.8, -0.3]

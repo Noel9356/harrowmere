@@ -118,7 +118,16 @@ add_library(harrowmere_ui SHARED
     $<TARGET_OBJECTS:harrowmere_ui_objects>
 )
 
-target_link_libraries(harrowmere_ui PRIVATE harrowmere_ui_imgui)
+# engine_kernel joins imgui here for the same reason harrowmere_core links it
+# (see that CMakeLists): $<TARGET_OBJECTS> carries object files only, and the
+# plugin and overlay objects call non-inline kernel functions
+# (configuration*InSection, executableDirectory, prettifyChannelName). ELF
+# tolerates the undefined references until load time; MinGW does not and
+# needs the kernel's import library on the link line.
+target_link_libraries(harrowmere_ui PRIVATE
+    harrowmere_ui_imgui
+    engine_kernel
+)
 
 # Plugin deployment: mirrors harrowmere_core (see that file for the full
 # commentary on PREFIX, RPATH and the Windows export mechanics).

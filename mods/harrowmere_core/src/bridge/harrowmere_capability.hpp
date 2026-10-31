@@ -309,6 +309,16 @@ struct SimCommand
 class SimCapability
 {
 public:
+    // The family name a mod acquires through: the manifest requirement
+    // spelling, and the grant the kernel derives from it
+    // ("capability.harrowmere"). The kernel answers a family request with the
+    // single active member's pointer (harrowmere.core) - engine_kernel.cpp,
+    // resolveCapabilityPointer: "exact declarations first, then - for a
+    // family request - the single active member".
+    static constexpr const char *capabilityFamily = "harrowmere";
+    // The concrete member the core mod's descriptor declares. The app (the
+    // trusted composition root) may acquire it directly; a mod that demands
+    // only the family has no grant for the member name and must not.
     static constexpr const char *capabilityName = "harrowmere.core";
     virtual ~SimCapability()                    = default;
 

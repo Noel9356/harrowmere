@@ -163,7 +163,10 @@ private:
     bool recorderRegistered_ = false; // the host's setOverlayRecorder ran
 
     // --- overlay state ---
-    bool visible_ = true;          // F1 toggles; default visible (the 7.3P1 Done-when requires F1 shows/hides)
+    bool visible_ = true;          // F1 toggles; default visible (the 7.3P1 Done-when requires F1 shows/hides);
+                                   // [harrowmere_ui] visible_on_start seeds it (a debug panel covering the
+                                   // world is a dev convenience, not a content promise - automated visual
+                                   // runs and players who want a clean first frame start it hidden)
     engine::KeyCode toggleKey_ = engine::KeyCode::Unknown; // [harrowmere_ui] key; default F1 (set in construct)
 
     // --- fps tracking (debug panel only; not a sim value) ---

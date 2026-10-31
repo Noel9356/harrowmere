@@ -162,6 +162,12 @@ inline constexpr engine::KeyCode kOverlayToggleKey = engine::KeyCode::F1;
 // feel the engine tuned - the mapper is a producer of the same state.
 inline constexpr double MOUSE_LOOK_RADIANS_PER_PIXEL = 0.0022; // 7.4P1 presentation (engine defaultLookSensitivity)
 
+// The follow-cam's eye height above the sim player transform, metres. The
+// sim-side player transform is a ground point (y is cosmetic, card 1.6); the
+// view needs an eye. 1.7 m is the standing eye-height convention; Phase 2's
+// avatar (card 7.2) replaces the number with the avatar's real eye line.
+inline constexpr double PLAYER_EYE_HEIGHT_M = 1.7; // 7.4P1 presentation (follow-cam, DEVIATIONS 2026-10-31)
+
 // The pitch clamp, just under +/-89 degrees - the engine camera controller's
 // own maxPitch. Keeps the forward vector out of the straight-up/down
 // degeneracy (the horizontal component of the walk heading can never vanish).
@@ -211,6 +217,49 @@ public:
     // controller's state, and external setters mutate IT - the mapper's look
     // therefore survives the controller's own per-frame write-back.
     virtual void setLookAt(const std::array<double, 3> &lookAt) = 0;
+
+    // Teleports the camera eye to a new position, KEEPING the current look
+    // direction (the renderer capability's documented setter contract:
+    // "a set position keeps the current look direction"). The follow-cam's
+    // only write - the walk stays observable without touching the heading the
+    // look integration owns.
+    virtual void setPosition(const std::array<double, 3> &position) = 0;
+};
+
+// ---- The follow-cam (the presentation half of "the player walks") -------------
+
+// The sim-side Move intent moves the PLAYER (a 10 Hz kinematic integration in
+// harrowmere_core); with no avatar in the scene until Phase 2 (card 7.2), a
+// camera that stays put makes the walk unobservable - the exit checklist's
+// "the player walks, sprints and looks around" would be invisible. The
+// follow-cam closes that gap: each frame it mirrors the sim's authoritative
+// player view into the camera EYE position (never the look direction - the
+// mapper owns that), presentation-only, one view read and one rig write per
+// frame.
+//
+// It is deliberately NOT part of InputMapper: the pinned
+// TestInput_NoDirectSimMutation keeps the input layer off the capability's
+// read side, and the follow-cam is not input - it is the renderer-side view
+// of sim state (the same split as the 7.2P1 scene bridge: reads a view,
+// pushes presentation, mutates nothing). The plugin wires it after the
+// mapper's frame update; a null rig (renderer absent) skips it entirely.
+// [harrowmere_ui].follow_camera (default on) turns it off for a dev fly run.
+class PlayerFollowCamera
+{
+public:
+    // All references the caller keeps alive for this object's lifetime (the
+    // plugin owns them as members).
+    PlayerFollowCamera(const harrowmere::SimCapability &sim, CameraRig &rig);
+
+    // One frame: read the player view, write the eye position. The look
+    // direction is never touched (the mapper owns it), so the framing the
+    // configured [scene.camera] seeded survives the teleport, and mouse look
+    // keeps working exactly as the mapper built it.
+    void update();
+
+private:
+    const harrowmere::SimCapability &sim_;
+    CameraRig &rig_;
 };
 
 // ---- The mapper ----------------------------------------------------------------

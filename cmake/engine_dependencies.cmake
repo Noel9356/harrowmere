@@ -158,6 +158,105 @@ function(engine_acquire_dependency dependencyName targetName)
                 "system packages, or one earlier configure with fetching enabled)")
     endif()
 
+    # ---- Stale sub-build healing ---------------------------------------------------
+    # Every populated dependency leaves two directories under _deps: <name>-src
+    # (the sources, kept) and <name>-subbuild (FetchContent's populate driver,
+    # regenerable bookkeeping). The subbuild carries a CMakeCache.txt of its
+    # own recording WHERE and HOW it was configured: its directory, the
+    # generator, the compiler paths. A build tree that was moved, renamed or
+    # copied (this project configured at c:/projects/engine one week and
+    # C:/projects/harrowmere the next), or a top-level cache rebuilt with
+    # another generator or toolchain, leaves that record describing a world
+    # that no longer exists - and FetchContent's populate step then dies on
+    # the subbuild's own cache guard ("The current CMakeCache.txt directory
+    # ... is different than the directory ... where CMakeCache.txt was
+    # created", or a generator/ABI mismatch) before the top-level configure
+    # can finish, leaving ninja without a build.ninja. Detect the mismatch
+    # here and discard exactly the stale bookkeeping: <name>-src is
+    # untouched, so healing re-downloads nothing; the populate step re-runs
+    # in place against the sources already on disk.
+    set(engineAcquireSubbuildDir "${FETCHCONTENT_BASE_DIR}/${dependencyName}-subbuild")
+    if(EXISTS "${engineAcquireSubbuildDir}/CMakeCache.txt")
+        set(engineAcquireRecordedDir "")
+        set(engineAcquireRecordedGenerator "")
+        set(engineAcquireRecordedCCompiler "")
+        set(engineAcquireRecordedCxxCompiler "")
+        file(STRINGS "${engineAcquireSubbuildDir}/CMakeCache.txt" engineAcquireSubbuildCacheLines)
+        foreach(engineAcquireCacheLine IN LISTS engineAcquireSubbuildCacheLines)
+            if(engineAcquireCacheLine MATCHES "^CMAKE_CACHEFILE_DIR:INTERNAL=(.*)$")
+                set(engineAcquireRecordedDir "${CMAKE_MATCH_1}")
+            elseif(engineAcquireCacheLine MATCHES "^CMAKE_GENERATOR:INTERNAL=(.*)$")
+                set(engineAcquireRecordedGenerator "${CMAKE_MATCH_1}")
+            elseif(engineAcquireCacheLine MATCHES "^CMAKE_C_COMPILER:INTERNAL=(.*)$")
+                set(engineAcquireRecordedCCompiler "${CMAKE_MATCH_1}")
+            elseif(engineAcquireCacheLine MATCHES "^CMAKE_CXX_COMPILER:INTERNAL=(.*)$")
+                set(engineAcquireRecordedCxxCompiler "${CMAKE_MATCH_1}")
+            endif()
+        endforeach()
+        string(STRIP "${engineAcquireRecordedDir}" engineAcquireRecordedDir)
+        string(STRIP "${engineAcquireRecordedGenerator}" engineAcquireRecordedGenerator)
+        string(STRIP "${engineAcquireRecordedCCompiler}" engineAcquireRecordedCCompiler)
+        string(STRIP "${engineAcquireRecordedCxxCompiler}" engineAcquireRecordedCxxCompiler)
+        set(engineAcquireSubbuildStale FALSE)
+        set(engineAcquireStaleReason "")
+        string(REGEX REPLACE "/+$" "" engineAcquireExpectedDir "${engineAcquireSubbuildDir}")
+        if(engineAcquireRecordedDir STREQUAL "")
+            # A cache without its directory record is damaged beyond what the
+            # populate step can regenerate on top of it.
+            set(engineAcquireSubbuildStale TRUE)
+            set(engineAcquireStaleReason "its cache records no directory (damaged cache)")
+        else()
+            string(REGEX REPLACE "/+$" "" engineAcquireRecordedDir "${engineAcquireRecordedDir}")
+            if(WIN32 OR APPLE)
+                # Case-insensitive file systems: engine and Engine are one directory.
+                string(TOLOWER "${engineAcquireRecordedDir}" engineAcquireRecordedDir)
+                string(TOLOWER "${engineAcquireExpectedDir}" engineAcquireExpectedDir)
+            endif()
+            if(NOT engineAcquireRecordedDir STREQUAL engineAcquireExpectedDir)
+                set(engineAcquireSubbuildStale TRUE)
+                set(engineAcquireStaleReason "its cache was created in ${engineAcquireRecordedDir}, not here")
+            endif()
+        endif()
+        if(NOT engineAcquireSubbuildStale
+           AND NOT engineAcquireRecordedGenerator STREQUAL ""
+           AND NOT engineAcquireRecordedGenerator STREQUAL "${CMAKE_GENERATOR}")
+            set(engineAcquireSubbuildStale TRUE)
+            set(engineAcquireStaleReason
+                "its cache was configured with the ${engineAcquireRecordedGenerator} generator, not ${CMAKE_GENERATOR}")
+        endif()
+        if(NOT engineAcquireSubbuildStale
+           AND NOT engineAcquireRecordedCCompiler STREQUAL ""
+           AND NOT "${engineAcquireRecordedCCompiler}" STREQUAL "${CMAKE_C_COMPILER}")
+            set(engineAcquireSubbuildStale TRUE)
+            set(engineAcquireStaleReason
+                "its cache was configured with the C compiler ${engineAcquireRecordedCCompiler}, not ${CMAKE_C_COMPILER}")
+        endif()
+        if(NOT engineAcquireSubbuildStale
+           AND NOT engineAcquireRecordedCxxCompiler STREQUAL ""
+           AND NOT "${engineAcquireRecordedCxxCompiler}" STREQUAL "${CMAKE_CXX_COMPILER}")
+            set(engineAcquireSubbuildStale TRUE)
+            set(engineAcquireStaleReason
+                "its cache was configured with the C++ compiler ${engineAcquireRecordedCxxCompiler}, not ${CMAKE_CXX_COMPILER}")
+        endif()
+        if(engineAcquireSubbuildStale)
+            message(STATUS
+                    "engine dependency '${dependencyName}': discarding a stale FetchContent sub-build "
+                    "(${engineAcquireStaleReason}); the populated sources in <name>-src are kept, "
+                    "nothing is re-downloaded")
+            file(REMOVE_RECURSE "${engineAcquireSubbuildDir}")
+        endif()
+        unset(engineAcquireSubbuildCacheLines)
+        unset(engineAcquireCacheLine)
+        unset(engineAcquireRecordedDir)
+        unset(engineAcquireRecordedGenerator)
+        unset(engineAcquireRecordedCCompiler)
+        unset(engineAcquireRecordedCxxCompiler)
+        unset(engineAcquireSubbuildStale)
+        unset(engineAcquireStaleReason)
+        unset(engineAcquireExpectedDir)
+        unset(engineAcquireSubbuildDir)
+    endif()
+
     engine_report_dependency_origin(${dependencyName} "${engineAcquireOrigin}")
     # Forward everything except the PIN_LABEL display-only keyword pair to
     # FetchContent: unknown keywords would be swallowed by ExternalProject's

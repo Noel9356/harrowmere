@@ -3,7 +3,9 @@
 Harrowmere's authoritative simulation and ALL base content, packaged as a
 native mod. This package is the demand root of the whole assembly: its
 manifest pulls the engine capabilities the game needs (`logging`, `scene`,
-`input`, plus optional `physics` / `audio` / `animation` / `asset`), it is the
+`input`, `lighting` + `pbr_direct_diffuse` - the 7.2P1 sun seam, required so
+the kernel's demand closure brings the lighting provider in, plus optional
+`physics` / `audio` / `animation` / `asset`), it is the
 run's only world claimant (`scene = "scene.toml"`), and it publishes the
 game's own capability family, `harrowmere` (member `harrowmere.core`), that
 the app acquires as a hard requirement and `harrowmere_ui` consumes like any

@@ -164,6 +164,7 @@ public:
     std::array<double, 3> positionValue = {0.0, 2.0, 0.0};
     std::array<double, 3> lookAtValue   = {0.0, 2.0, -10.0}; // the convention's default heading (-Z)
     std::uint32_t lookWrites            = 0;
+    std::uint32_t positionWrites        = 0;
 
     std::array<double, 3> position() const override
     {
@@ -182,15 +183,28 @@ public:
         lookAtValue = lookAt;
         ++lookWrites;
     }
+
+    void setPosition(
+        const std::array<double, 3> &position
+    ) override
+    {
+        // The renderer contract the seam mirrors: a set position keeps the
+        // current look direction - so the fake writes the eye only.
+        positionValue = position;
+        ++positionWrites;
+    }
 };
 
 // A strict SimCapability: counts every read (the mapper must make none) and
-// records every submit (the only interaction the write path allows).
+// records every submit (the only interaction the write path allows). The
+// player view is seedable so the follow-cam test can stage a transform - the
+// mapper under test still never touches it.
 class RecordingSim final : public harrowmere::SimCapability
 {
 public:
     mutable std::uint32_t readCount = 0; // the view readers are const (4.2)
     std::vector<harrowmere::SimCommand> submitted;
+    harrowmere::views::PlayerView playerView{}; // the staged player transform (tests only)
 
     const harrowmere::views::WorldView &world() const override
     {
@@ -207,7 +221,7 @@ public:
     const harrowmere::views::PlayerView &player() const override
     {
         ++readCount;
-        return SimCapability::player();
+        return playerView;
     }
 
     const harrowmere::views::JusticeView &justice() const override
@@ -525,4 +539,52 @@ TEST_CASE("TestInput_IntentRoundTrip")
     const harrowmere::Position stopped = applyOneFixedUpdate(harness.sim, 0.1);
     CHECK(stopped.x == doctest::Approx(0.0));
     CHECK(stopped.z == doctest::Approx(0.0));
+}
+
+// ---------------------------------------------------------------------------
+// TestInput_FollowCameraMirrorsPlayerView - the presentation half of "the
+// player walks" (DEVIATIONS 2026-10-31): the follow-cam reads the sim's
+// player view and writes ONLY the rig's eye position (view + eye height);
+// the look direction the mapper owns is never touched, and the mapper itself
+// still makes zero view reads (TestInput_NoDirectSimMutation stays true).
+// ---------------------------------------------------------------------------
+TEST_CASE("TestInput_FollowCameraMirrorsPlayerView")
+{
+    Harness harness;
+    REQUIRE(harness.sim.readCount == 0); // the mapper frame so far: no view reads
+
+    // The sim's authoritative transform (as worldgen staged it: the beginner
+    // village center, ground plane y=0). The eye rides PLAYER_EYE_HEIGHT_M
+    // above it; x/z mirror exactly.
+    harness.sim.playerView.position = harrowmere::views::Position{100.0, 0.0, -40.0};
+    const std::array<double, 3> lookBefore = harness.rig.lookAtValue;
+
+    harrowmere::ui::PlayerFollowCamera follow(harness.sim, harness.rig);
+    follow.update();
+
+    CHECK(harness.sim.readCount == 1); // exactly one view read per frame
+    CHECK(harness.rig.positionWrites == 1);
+    CHECK(harness.rig.positionValue[0] == doctest::Approx(100.0));
+    CHECK(harness.rig.positionValue[1] == doctest::Approx(harrowmere::ui::PLAYER_EYE_HEIGHT_M));
+    CHECK(harness.rig.positionValue[2] == doctest::Approx(-40.0));
+    // The look contract: the teleport keeps the direction - the look target
+    // is untouched and the mapper-owned state never moved.
+    CHECK(harness.rig.lookWrites == 0);
+    CHECK(harness.rig.lookAtValue == lookBefore);
+
+    // A walk frame: the sim advances the player (4 m/s * 0.1 s, as the
+    // roundtrip test integrates it), the next follow update mirrors it - the
+    // eye FOLLOWS, which is what makes the walk observable from the view.
+    harness.sim.playerView.position = harrowmere::views::Position{100.0, 0.0, -40.4};
+    follow.update();
+    CHECK(harness.sim.readCount == 2);
+    CHECK(harness.rig.positionValue[2] == doctest::Approx(-40.4));
+    CHECK(harness.rig.lookWrites == 0); // still: position only, every frame
+
+    // A raised transform (the sim's y is cosmetic today, but the mirror adds
+    // the eye height to whatever the view carries - Phase 2's avatar can
+    // lift the eye by staging a taller transform).
+    harness.sim.playerView.position = harrowmere::views::Position{0.0, 12.0, 0.0};
+    follow.update();
+    CHECK(harness.rig.positionValue[1] == doctest::Approx(12.0 + harrowmere::ui::PLAYER_EYE_HEIGHT_M));
 }

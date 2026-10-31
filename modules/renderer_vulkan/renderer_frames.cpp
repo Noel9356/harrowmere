@@ -470,7 +470,8 @@ void RendererState::recordCompositeIntoTarget(
     const vk::ImageView &targetView,
     vk::Extent2D extent,
     std::int32_t tonemapModeValue,
-    vk::ImageLayout targetLayout
+    vk::ImageLayout targetLayout,
+    const vk::raii::Pipeline &pipeline
 )
 {
     vk::RenderingAttachmentInfo colorAttachment;
@@ -498,7 +499,7 @@ void RendererState::recordCompositeIntoTarget(
     };
 
     commandBuffer.beginRendering(renderingInfo);
-    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, **compositePipeline);
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline);
     const vk::Viewport viewport(
         0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f
     );
@@ -525,7 +526,8 @@ void RendererState::recordCompositePass(
         swapchainImageViews[imageIndex],
         swapchainExtent,
         resolvedTonemapMode(),
-        vk::ImageLayout::eColorAttachmentOptimal
+        vk::ImageLayout::eColorAttachmentOptimal,
+        *compositePipeline
     );
 }
 
@@ -543,8 +545,17 @@ void RendererState::recordBloomPass(
     // HDR image persists in GENERAL like every frame image, so the attachment
     // must declare that layout - eColorAttachmentOptimal here would trip the
     // dynamic-rendering validation layer on every bloom frame.
+    //
+    // This pass draws with compositeHdrPipeline, NOT the swapchain composite:
+    // the two targets have different formats (hdrColorFormat RGBA16F vs the
+    // swapchain's sRGB surface) and VkPipelineRenderingCreateInfo must match
+    // the attachment the pipeline actually draws into - a swapchain-format
+    // pipeline writing the float target is undefined behavior (the validation
+    // layer rejects it on every bloom frame, VUID-08910, and the written
+    // pixels are implementation-defined).
     recordCompositeIntoTarget(
-        commandBuffer, *hdrSceneImage.view, swapchainExtent, tonemapNone, vk::ImageLayout::eGeneral
+        commandBuffer, *hdrSceneImage.view, swapchainExtent, tonemapNone, vk::ImageLayout::eGeneral,
+        *compositeHdrPipeline
     );
 
     // HDR composite writes -> extract reads.

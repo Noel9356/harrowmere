@@ -9,6 +9,7 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -36,6 +37,7 @@ void RendererState::createPipelines()
     // recreateSwapchain and once during initialize, so this is always safe.
     compositeDescriptorSet.reset();
     compositeDescriptorPool.reset();
+    compositeHdrPipeline.reset();
     compositePipeline.reset();
     compositePipelineLayout.reset();
     compositeSetLayout.reset();
@@ -119,7 +121,21 @@ void RendererState::createScenePipeline()
 
         vk::PipelineRasterizationStateCreateInfo rasterization;
         rasterization.setPolygonMode(vk::PolygonMode::eFill);
-        rasterization.setCullMode(vk::CullModeFlagBits::eNone);
+        // Backface culling. This matters for correctness, not just cost: the
+        // ground "plane" is a 0.02 m thin box whose two large faces collide
+        // in depth when the view is near-edge-on - without culling the unlit
+        // bottom face won the tie on some rasterizers and the whole ground
+        // rendered black (the lit top face on others: the brown/black
+        // flicker reported on the first Windows runs). Culling the inward
+        // face removes the fight; the win is one discarded half of the
+        // raster work on every box in the scene.
+        //
+        // Winding pairing (verified against the probes: with eClockwise the
+        // outward faces vanished and every box rendered as its black
+        // interior): the projection's Y-flip combined with the RH lookAt
+        // keeps the meshes' outward-CCW winding CCW in the framebuffer, so
+        // outward = front with the default eCounterClockwise.
+        rasterization.setCullMode(vk::CullModeFlagBits::eBack);
         rasterization.setFrontFace(vk::FrontFace::eCounterClockwise);
         rasterization.setLineWidth(1.0f);
 
@@ -301,6 +317,19 @@ void RendererState::createCompositePipeline()
         pipelineInfo.setRenderPass(nullptr);
 
         compositePipeline = std::make_unique<vk::raii::Pipeline>(*device, *pipelineCache, pipelineInfo);
+
+        // The bloom path's composite variant: identical shaders, layout and
+        // descriptor set, but its VkPipelineRenderingCreateInfo names the HDR
+        // intermediate's format (RGBA16F) instead of the swapchain's - the
+        // untonemapped composite draws into hdrSceneImage, and a pipeline's
+        // declared color format must match the attachment it draws into
+        // (dynamic rendering has no render pass to derive it from). Created
+        // only when bloom is enabled; destroyed with the rest below.
+        if (bloomEnabled)
+        {
+            renderingInfo.setColorAttachmentFormats(hdrColorFormat);
+            compositeHdrPipeline = std::make_unique<vk::raii::Pipeline>(*device, *pipelineCache, pipelineInfo);
+        }
 
         std::array<vk::DescriptorPoolSize, 2> compositePoolSizes{
             vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, compositeImageBindingCount),

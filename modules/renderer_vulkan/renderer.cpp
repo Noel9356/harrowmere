@@ -319,6 +319,30 @@ void RendererModule::construct(
 
 void RendererModule::start()
 {
+    // Headless degrade (the game assembly's pinned CI shape, common.md
+    // section 3.6 "headless degrades window/renderer, never input"): the
+    // window module started windowless - no usable display - so there is no
+    // surface to create an instance, a device or a swapchain against.
+    // Failing the whole startup here would make the pinned headless smoke
+    // run (--set engine.quit_after_seconds=1.0, exit 0) impossible, and the
+    // gameplay layer is renderer-free by design (the boot card: the tick
+    // skeleton, the world model and the sim capability run unchanged without
+    // a frame). The module therefore starts render-free: headlessDegrade
+    // short-circuits the per-frame path and the state below stays allocated
+    // but uninitialized, which every remaining capability method already
+    // guards on. A display-capable environment is unaffected: the window
+    // list is non-empty and initialization proceeds exactly as before.
+    if (windowCapability->windowIdentifiers().empty())
+    {
+        headlessDegrade = true;
+        if (logger != nullptr)
+        {
+            logger->logMessage(
+                LogLevel::Warning, "renderer module: no usable display - running render-free (headless degrade)"
+            );
+        }
+        return;
+    }
     state->resolvedShaderDirectory  = state->shaderDirectory.is_relative()
                                         ? (executableDirectory() / state->shaderDirectory)
                                         : state->shaderDirectory;
@@ -691,6 +715,15 @@ void RendererModule::handleConfigurationReloaded(
 
 void RendererModule::renderFrame()
 {
+    // Headless degrade: no surface, no frame. The frame-skeleton events stay
+    // unpublished - their consumers (screenshot captures, the trim-deleted ui
+    // module's widgets) are meaningless without a frame, and the composition
+    // root's own EngineFrameEvent heartbeat is what the gameplay layer ticks
+    // from, renderer-free (the boot card).
+    if (headlessDegrade)
+    {
+        return;
+    }
     if (state == nullptr || state->swapchain == nullptr)
     {
         throw std::runtime_error(logPrefix + "renderFrame called before start");

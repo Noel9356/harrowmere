@@ -246,4 +246,27 @@ void InputMapper::update()
     sim_.submit(command);
 }
 
+// ---- PlayerFollowCamera -------------------------------------------------------
+
+PlayerFollowCamera::PlayerFollowCamera(
+    const harrowmere::SimCapability &sim,
+    CameraRig &rig
+)
+    : sim_(sim)
+    , rig_(rig)
+{
+}
+
+void PlayerFollowCamera::update()
+{
+    // The sim's player view IS the authoritative transform (rebuilt at tick
+    // step 13; the frame reads a settled snapshot). The eye rides
+    // PLAYER_EYE_HEIGHT_M above the ground-plane transform; the look
+    // direction stays exactly where the look integration left it - the rig's
+    // setPosition keeps it by contract (the renderer capability's setter
+    // semantics, mirrored on the seam).
+    const harrowmere::views::PlayerView &player = sim_.player();
+    rig_.setPosition({player.position.x, player.position.y + PLAYER_EYE_HEIGHT_M, player.position.z});
+}
+
 } // namespace harrowmere::ui

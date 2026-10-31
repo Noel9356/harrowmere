@@ -119,6 +119,17 @@ public:
                                     static_cast<float>(lookAt[2])});
     }
 
+    void setPosition(
+        const std::array<double, 3> &position
+    ) override
+    {
+        // The renderer capability's documented teleport semantics: the pose
+        // is the free-fly controller's state, and a set position keeps the
+        // current look direction - exactly the follow-cam's contract.
+        renderer_->setCameraPosition({static_cast<float>(position[0]), static_cast<float>(position[1]),
+                                      static_cast<float>(position[2])});
+    }
+
 private:
     engine::RendererCapability *renderer_;
 };
@@ -138,7 +149,8 @@ public:
         manifest_.providedCapabilities = {"ui.harrowmere"};
         manifest_.requiredCapabilities = {"harrowmere", "input", "renderer.vulkan.overlay"};
         manifest_.optionalCapabilities = {"renderer", "window"};
-        manifest_.knownConfigKeys      = {"harrowmere_ui.key"};
+        manifest_.knownConfigKeys      = {"harrowmere_ui.key", "harrowmere_ui.visible_on_start",
+                                          "harrowmere_ui.follow_camera"};
     }
 
     const engine::ComponentManifest &manifest() const override
@@ -166,7 +178,7 @@ public:
         // trusted composition root (granted everything), a mod is not.
         engine::InputCapability &input = context.acquireCapability<engine::InputCapability>();
         harrowmere::SimCapability &sim = *static_cast<harrowmere::SimCapability *>(
-            context.acquireCapability(harrowmere::SimCapability::capabilityName));
+            context.acquireCapability(harrowmere::SimCapability::capabilityFamily));
 
         // The optional camera rig: present in every real run of the game
         // assembly (this mod's own renderer.vulkan.overlay requirement pulls
@@ -175,6 +187,18 @@ public:
         engine::RendererCapability *renderer = context.tryAcquireCapability<engine::RendererCapability>();
         cameraRig_                           = renderer != nullptr ? std::make_unique<RendererCameraRig>(*renderer)
                                                                    : nullptr;
+
+        // The follow-cam (the presentation half of "the player walks", see
+        // input_mapper.hpp): ON by default - the exit checklist's walk is
+        // observable through it. [harrowmere_ui].follow_camera = 0 restores
+        // the pure dev fly camera (the camera then stays wherever the
+        // configured pose and the gamepad axes put it). Degrades off with the
+        // rig (renderer absent), like every camera feature here.
+        const bool followCamera = context.configurationIntegerInSection("harrowmere_ui", "follow_camera").value_or(1) != 0;
+        if (cameraRig_ != nullptr && followCamera)
+        {
+            followCamera_ = std::make_unique<harrowmere::ui::PlayerFollowCamera>(sim, *cameraRig_);
+        }
 
         // The 7.3P1 overlay component (construct acquires its own
         // capabilities, subscribes the F1 toggle, reads [harrowmere_ui] key).
@@ -223,6 +247,7 @@ public:
         // reset keeps the same shape the engine modules keep.
         frameSubscription_.release();
         mapper_.reset();
+        followCamera_.reset();
         gate_.reset();
         if (overlay_ != nullptr)
         {
@@ -244,9 +269,13 @@ public:
     }
 
 private:
-    // The per-frame dispatch: one input-mapper update, nothing else. Input is
-    // frame-coupled by design (input_mapper.hpp); the sim reads the submitted
-    // intents on the fixed-update lane.
+    // The per-frame dispatch: one input-mapper update, then the follow-cam
+    // (the mapper is input - device reads and intent submission; the
+    // follow-cam is presentation - one view read, one eye write. Both ride
+    // the same frame event; the order makes the walk land on the same frame
+    // the intent was submitted from). Input is frame-coupled by design
+    // (input_mapper.hpp); the sim reads the submitted intents on the
+    // fixed-update lane.
     void onFrame(
         const engine::EngineFrameEvent & /*event*/
     )
@@ -254,6 +283,10 @@ private:
         if (mapper_ != nullptr)
         {
             mapper_->update();
+        }
+        if (followCamera_ != nullptr)
+        {
+            followCamera_->update();
         }
     }
 
@@ -266,6 +299,7 @@ private:
     std::unique_ptr<harrowmere::ui::HarrowmereUi> overlay_;
     std::unique_ptr<OverlayUiGate> gate_;
     std::unique_ptr<RendererCameraRig> cameraRig_;
+    std::unique_ptr<harrowmere::ui::PlayerFollowCamera> followCamera_;
     std::unique_ptr<harrowmere::ui::InputMapper> mapper_;
     engine::EventSubscription frameSubscription_;
 };

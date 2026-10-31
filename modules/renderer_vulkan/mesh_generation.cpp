@@ -89,7 +89,12 @@ MeshData buildSphereMesh(
             const std::uint32_t row                 = stack * (slices + 1);
             const std::uint32_t a                   = row + slice;
             const std::uint32_t b                   = a + slices + 1;
-            const std::array<std::uint32_t, 6> quad = {a, b, a + 1u, a + 1u, b, b + 1u};
+            // Winding matches the unit box's outward-CCW convention
+            // (mesh_generation.hpp): the triangle (a, a+1, b) cross-product
+            // points outward. The previous order (a, b, a+1) wound INWARD -
+            // correct only while the pipeline drew double-sided; with
+            // backface culling the sphere would have rendered inside-out.
+            const std::array<std::uint32_t, 6> quad = {a, a + 1u, b, a + 1u, b + 1u, b};
             mesh.indices.insert(mesh.indices.end(), quad.begin(), quad.end());
         }
     }

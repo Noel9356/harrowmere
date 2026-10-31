@@ -133,6 +133,16 @@ private:
     // recreation needs the device idle (the frame serialization guarantees
     // that), never a mid-frame swap.
     bool shadersNeedReload = false;
+    // Headless degrade (common.md section 3.6 "headless degrades
+    // window/renderer, never input"): set in start() when the window module
+    // came up windowless (no usable display), so there is no surface to
+    // initialize against. The module then starts render-free - state stays
+    // allocated but uninitialized (null device, null swapchain), renderFrame
+    // returns without publishing the frame-skeleton events, and the
+    // remaining capability methods already guard on the uninitialized state
+    // (camera accessors return the defaults, waitUntilIdle skips the null
+    // device). A display-capable environment never sets it.
+    bool headlessDegrade = false;
     // Tri-state scene capability resolution: 0 unresolved, 1 available,
     // -1 decided unavailable (module compiled out or permission denied).
     int sceneResolutionState = 0;

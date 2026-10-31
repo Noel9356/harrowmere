@@ -17,8 +17,10 @@
 // Scheduler until Phase 2's task 3.1):
 //
 //   construct  - acquire logging (install the HARROWMERE_LOG_* sink), scene
-//                (the bridge's registry) and input; probe the optional
-//                lighting provider (the bridge's sun; degrade-if-absent);
+//                (the bridge's registry), input and the lighting provider
+//                (the bridge's sun - the manifest DEMANDS lighting +
+//                pbr_direct_diffuse, so the provider is in the run; the
+//                probe below stays as the degrade-if-absent guard);
 //                read the [harrowmere] config through the 0.4 wrapper seam.
 //   start      - load the DataRegistry from the package dir (0.4's pinned
 //                path resolution), fail startup with file+pointer+reason on
@@ -54,7 +56,7 @@
 
 #include "logging_capability.hpp"
 #include "scene_capability.hpp"        // engine::SceneCapability (required)
-#include "lighting_capability.hpp"     // engine::LightingCapability (optional)
+#include "lighting_capability.hpp"     // engine::LightingCapability (manifest-demanded; the probe stays defensive)
 
 #include "harrowmere_capability.hpp"
 
@@ -230,8 +232,9 @@ private:
 };
 
 // SceneRegistrySink over the engine capabilities: objects land in the scene
-// registry (required), the sun lands in the lighting state (optional -
-// degrade-if-absent, common.md §4.0), the sky tint has no runtime engine
+// registry (required), the sun lands in the lighting state (manifest-demanded
+// - this sink still degrades to a no-op when a trimmed build ships without
+// the provider), the sky tint has no runtime engine
 // surface in v1 (the renderer reads [scene].sky_radiance at start; the
 // runtime seam is 7.2's Phase-2 bridge sync) - the tint is computed and
 // logged-once, never silently dropped.
@@ -453,8 +456,13 @@ public:
         manifest_.kind                 = engine::ComponentKind::SharedLibraryMod;
         manifest_.version              = "0.1.0";
         manifest_.providedCapabilities = {"harrowmere.core"};
-        manifest_.requiredCapabilities = {"logging", "scene", "input"};
-        manifest_.optionalCapabilities = {"physics", "audio", "animation", "asset", "lighting"};
+        // Required capabilities MUST mirror mod.toml's `capabilities`: the
+        // kernel's demand closure is seeded by the PACKAGE manifest for mods,
+        // and these two names are what bring the lighting provider into the
+        // run (see mod.toml for the full why). Lockstep is the file's own
+        // convention - keep the two files identical on every edit.
+        manifest_.requiredCapabilities = {"logging", "scene", "input", "lighting", "pbr_direct_diffuse"};
+        manifest_.optionalCapabilities = {"physics", "audio", "animation", "asset"};
         manifest_.requiredPermissions  = {"filesystem.write"};
         manifest_.knownConfigKeys      = {
             "harrowmere.tick_rate",
@@ -482,9 +490,12 @@ public:
         // The event bus: the two lane subscriptions bind here (start()).
         bus_ = &context.eventBus();
 
-        // The optional lighting provider (the bridge's sun): declared in
-        // optional_capabilities, probed here - an absent provider degrades
-        // the sun seam, never the run (common.md §4.0).
+        // The lighting provider (the bridge's sun): the manifest demands
+        // "lighting" + "pbr_direct_diffuse" (see mod.toml - optional could
+        // never pull the provider, kernel demand-closure semantics), so the
+        // probe succeeds in every assembly that ships the game's module set.
+        // The probe remains the degrade-if-absent guard: a custom assembly
+        // that trims the pbr module loses the sun, never the run.
         if (context.isCapabilityAvailable("lighting"))
         {
             lighting_ = static_cast<engine::LightingCapability *>(context.acquireCapability("lighting"));
@@ -548,7 +559,15 @@ public:
 
         // Clocks and RNG (0.3): the fixed-update lane drives both.
         clock_.timeScale = config_.timeScale();
-        clock_.tickRate = config_.tickRate();
+        clock_.tickRate  = config_.tickRate();
+        // The world epoch opens at 10:00 game time, not midnight: the 7.2P1
+        // sun seam maps midnight to intensity 0 (computeSun clamps the night
+        // to zero), so a 0-seeded worldTime staged the whole first session in
+        // the dark - the first Windows run rendered exactly that (black
+        // ground, 2026-10-30). Mid-morning spawns in full daylight with long
+        // shadows; the constant is deterministic (R6: every peer seeds the
+        // same value), and 7.1's saves persist worldTime from Phase 4 on.
+        clock_.worldTime = 10u * 3600u;
         rng_.seedAll(seed);
 
         // The two lane subscriptions (the fixed-update lane IS the sim's

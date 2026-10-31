@@ -5,7 +5,7 @@ Requirements: CMake 3.24+, a C++20 compiler, a Vulkan loader, and `glslangValida
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
-./build/runtime/engine
+./build/runtime/harrowmere
 ```
 
 If the Vulkan loader is not on the default linker path, add `-DCMAKE_PREFIX_PATH=/your/prefix`. On Windows the build defines `WIN32_LEAN_AND_MEAN` and `NOMINMAX` once for the whole tree (engine targets and in-tree mods alike), so no source file defines them itself. MinGW builds additionally deploy the toolchain's runtime DLLs (`libstdc++-6.dll`, `libgcc_s_seh-1.dll`, `libwinpthread-1.dll`) into `build/runtime/` after the link: without them a run started from a shell (or a double-click) whose `PATH` does not carry the compiler's `bin/` directory fails to start with no visible diagnostic - the Windows loader refuses the process before any engine code runs, so the terminal shows nothing at all. With the DLLs deployed the runtime directory is self-contained and the quick start works from any shell.
@@ -24,7 +24,7 @@ On a display-less machine a run needs a Vulkan ICD; any software ICD works, for 
 export VK_DRIVER_FILES=/path/to/lvp_icd.json   # or VK_ICD_FILENAMES on older loaders
 ```
 
-Screenshots are written to a `screenshots` folder in the process working directory by default - the project root for the documented quick start (`./build/runtime/engine` from the engine tree) - so captures land where the user actually looks; `[screenshot] output_directory` overrides this (relative paths also resolve against the working directory, absolute paths as-is; see `modules/screenshot_png/README.md`).
+Screenshots are written to a `screenshots` folder in the process working directory by default - the project root for the documented quick start (`./build/runtime/harrowmere` from the engine tree) - so captures land where the user actually looks; `[screenshot] output_directory` overrides this (relative paths also resolve against the working directory, absolute paths as-is; see `modules/screenshot_png/README.md`).
 
 ## Dependencies
 
@@ -61,6 +61,22 @@ FetchContent separates each dependency automatically:
 | `build/_deps/<name>-subbuild` | FetchContent's populate bookkeeping |
 
 Header-only dependencies the engine wraps itself (Vulkan-Hpp, sol2, toml++) are populate-only: a `-src` directory, no `-build`. stb is a single file cached in `build/deps/stb/`; the Lua tarball is cached in `build/deps/`.
+
+### Moving or copying a build tree ("The current CMakeCache.txt directory ... is different")
+
+A `build/` directory records absolute paths: where the project lived, which generator and compilers configured it. Moving, renaming or copying the project folder together with its build tree (the classic case: configured at `c:/projects/engine` one week, `C:/projects/harrowmere` the next), or reconfiguring a kept `build/` with another generator or toolchain, leaves the per-dependency `build/_deps/<name>-subbuild` caches describing a world that no longer exists - and configure dies mid-way on FetchContent's guard:
+
+```text
+CMake Error: The current CMakeCache.txt directory .../build/_deps/glfw-subbuild/CMakeCache.txt
+is different than the directory ... where CMakeCache.txt was created. This may result in
+binaries being created in the wrong place. If you are not sure, reedit the CMakeCache.txt
+CMake step for glfw failed: 1
+ninja: error: loading 'build.ninja': The system cannot find the file specified.
+```
+
+A `<name>-subbuild` directory is regenerable bookkeeping, so the engine's dependency acquisition (`cmake/engine_dependencies.cmake`) detects the mismatch at configure time - the recorded cache directory, generator or compiler paths no longer matching this configure - and discards the stale subbuild, re-driving the population in place: the populated `<name>-src` sources are kept (the configure log shows `engine dependency '<name>': discarding a stale FetchContent sub-build (...)`), so nothing is re-downloaded and the configure completes. The same self-heal covers a build tree that merely switched generators or compilers between configures.
+
+The top-level `build/CMakeCache.txt` is CMake's own and is guarded before any project code runs: when CMake reports the directory or generator mismatch for IT (for example after reconfiguring with a different `-G`), the remedy is to delete `build/CMakeCache.txt` and `build/CMakeFiles/` - or the whole `build/` directory - and configure again. Never hand-edit the cache (the "reedit the CMakeCache.txt" suggestion included): the `_deps` subbuild caches are healed automatically, but a hand-edited top-level cache can keep any other stale value. The pinned dependencies re-download once into a fresh `build/` and are cached from then on.
 
 ### Offline and air-gapped builds
 

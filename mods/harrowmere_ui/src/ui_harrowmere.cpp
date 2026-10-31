@@ -52,7 +52,7 @@ void HarrowmereUi::construct(engine::ComponentContext& ctx) {
     // requirement grants to a mod); input and the overlay host are typed
     // members whose names match their manifest requirements.
     sim_ = static_cast<harrowmere::SimCapability *>(
-        ctx.acquireCapability(harrowmere::SimCapability::capabilityName));
+        ctx.acquireCapability(harrowmere::SimCapability::capabilityFamily));
     input_ = &ctx.acquireCapability<engine::InputCapability>();
     overlay_ = static_cast<engine::RendererOverlayHostCapability *>(
         ctx.acquireCapability(engine::RendererOverlayHostCapability::capabilityName));
@@ -77,6 +77,13 @@ void HarrowmereUi::construct(engine::ComponentContext& ctx) {
         HARROWMERE_LOG_WARN(HARROWMERE_LOG_CATEGORY, "[harrowmere_ui] key \"%s\" is not a known key name; F1 toggle disabled",
                             keyName.c_str());
     }
+
+    // The start-state seed for the same debug panel (config_keys entry
+    // "harrowmere_ui.visible_on_start", default true = the 7.3P1 pinned
+    // behavior): a run that starts the panel hidden presses F1 to show it -
+    // the toggle itself is unchanged. Automated visual runs stage the key
+    // through the configuration so captures see the world, not the panel.
+    visible_ = ctx.configurationIntegerInSection("harrowmere_ui", "visible_on_start").value_or(1) != 0;
 
     // Subscribe to KeyPressedEvent for F1 toggles. Polled movement keys
     // (WASD, Shift, mouse look) are read through InputCapability each frame

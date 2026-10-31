@@ -335,6 +335,11 @@ struct RendererState
     std::unique_ptr<vk::raii::DescriptorSet> sceneDescriptorSet;
     std::unique_ptr<vk::raii::PipelineLayout> compositePipelineLayout;
     std::unique_ptr<vk::raii::Pipeline> compositePipeline;
+    // The bloom path's composite: same shaders/layout as compositePipeline,
+    // VkPipelineRenderingCreateInfo naming hdrColorFormat (the untonemapped
+    // composite draws into the RGBA16F HDR intermediate; the swapchain-format
+    // pipeline must not). Null when bloom is disabled.
+    std::unique_ptr<vk::raii::Pipeline> compositeHdrPipeline;
     std::unique_ptr<vk::raii::DescriptorSetLayout> compositeSetLayout;
     std::unique_ptr<vk::raii::DescriptorPool> compositeDescriptorPool;
     std::unique_ptr<vk::raii::DescriptorSet> compositeDescriptorSet;
@@ -666,7 +671,12 @@ struct RendererState
         const vk::ImageView &targetView,
         vk::Extent2D extent,
         std::int32_t tonemapModeValue,
-        vk::ImageLayout targetLayout = vk::ImageLayout::eColorAttachmentOptimal
+        vk::ImageLayout targetLayout,
+        // The pipeline whose declared color format matches targetView's
+        // image: compositePipeline for the swapchain, compositeHdrPipeline
+        // for the bloom path's RGBA16F intermediate (dynamic rendering
+        // derives the attachment format from this, never from a render pass).
+        const vk::raii::Pipeline &pipeline
     );
     void writeCompositeDescriptors();
     void createCommandAndSyncObjects();

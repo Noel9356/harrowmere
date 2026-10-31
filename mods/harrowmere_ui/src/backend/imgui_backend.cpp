@@ -139,8 +139,14 @@ bool ImGuiBackend::init(const ImGuiBackendHandles& handles, std::string& errOut)
     // PipelineRenderingCreateInfo (one color attachment: the swapchain
     // format the bundle carries as a plain integer). The format value lives
     // in the Impl so the pointer stays valid for the backend's pipeline
-    // creation inside Init.
+    // creation inside Init. The sType MUST be set explicitly: the zero-init
+    // struct's sType 0 is VK_STRUCTURE_TYPE_APPLICATION_INFO, and a pNext
+    // chain that leads with it makes the pipeline's rendering state
+    // unreadable - the backend then creates its pipeline with an empty
+    // colorAttachmentCount (undefined attachment format on every driver; the
+    // validation layer names the missing pNext chain outright).
     impl_->swapchainFormat = static_cast<VkFormat>(handles.colorFormat);
+    info.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
     info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &impl_->swapchainFormat;
     info.Subpass = 0;

@@ -46,7 +46,8 @@ harrowmere/                      # this repo
 ├── config/harrowmere.toml       # the assembly config: [engine] pacing, [trust], permission policy
 ├── mods/
 │   ├── harrowmere_core/         # native mod: authoritative simulation + ALL base content
-│   │                            #   requires logging/scene/input (+ optional physics/audio/animation/asset)
+│   │                            #   requires logging/scene/input + lighting/pbr_direct_diffuse
+│   │                            #   (+ optional physics/audio/animation/asset)
 │   │                            #   provides harrowmere.core; claims the world (scene.toml); owns data/
 │   └── harrowmere_ui/           # native mod: ImGui surface (requires harrowmere, input, renderer.vulkan.overlay;
 │                                #   provides ui.harrowmere) — the 7.3P1 debug overlay (F1) + the 7.4P1 input layer

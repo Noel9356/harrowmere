@@ -32,7 +32,9 @@
 # manifest requires a capability it provides, and the providers' own
 # requirements pull their dependencies transitively. This assembly's demand
 # roots are exactly the two game mods: harrowmere_core (logging, scene, input
-# + optional physics/audio/animation/asset) and harrowmere_ui (harrowmere,
+# + lighting/pbr_direct_diffuse - the 7.2P1 sun seam, required so the demand
+# closure pulls the lighting provider in; + optional
+# physics/audio/animation/asset) and harrowmere_ui (harrowmere,
 # input, renderer.vulkan.overlay). harrowmere_ui is what pulls the renderer
 # into the run; harrowmere_core's optional capabilities never pull a provider
 # on their own - a missing optional provider degrades the feature, never the
@@ -157,6 +159,17 @@ latency_report = false
 # module's default title.
 [window]
 title = "Harrowmere"
+
+# The PBR technique's shadows are sphere-traced per pixel against the whole
+# analytic scene (every step evaluates every primitive's SDF), so the step
+# count is the frame's dominant cost - the module default 24 measured ~40%
+# of total frame time in this world (a 16 km plane plus 70 markers gives the
+# marcher a long SDF loop). 12 keeps the marker/safe-zone shadow edges
+# visually identical in this scene at half the cost (measured side by side;
+# DEVIATIONS.md 2026-10-31). Lower it further (8/6) on weak GPUs before
+# touching bloom - bloom measured ~4%.
+[lighting.pbr]
+shadow_steps = 12
 
 # Examples - uncomment to override:
 #

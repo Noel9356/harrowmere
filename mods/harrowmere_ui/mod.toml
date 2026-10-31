@@ -21,5 +21,5 @@ provides = ["ui.harrowmere"]           # the UI mod's own capability; the panels
 # renderer.vulkan.overlay requirement pulls the renderer module, so the probe
 # resolves in every real run.
 optional_capabilities = ["renderer", "window"]  # the camera rig + the ImGui platform backend's GLFW handle: degrade-if-absent (common.md section 4.0)
-config_keys = ["harrowmere_ui.key"]  # the F1 toggle (7.3P1); a missing key falls back to F1
+config_keys = ["harrowmere_ui.key", "harrowmere_ui.visible_on_start", "harrowmere_ui.follow_camera"]  # the F1 toggle (7.3P1), the overlay's start state, and the follow-cam switch (7.4P1: 0 restores the dev fly camera); a missing key falls back to F1 / visible / on
 requires = []
