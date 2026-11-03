@@ -1,0 +1,21 @@
+# Shipped defaults of the settings_toml module.
+#
+# This file is the module's own configuration layer: the kernel merges it as
+# the lowest defaults layer (docs/configuration.md, "The layer stack"), so
+# every assembly configuration - config/engine.toml or a staged override -
+# wins over anything written here. Defaults FILL: a key a higher layer
+# already provided is never touched.
+#
+# Documented in README.md next to this file.
+
+[settings]
+# The store's default file, resolved against the executable directory (the
+# engine's path convention for state the RUN owns - the same convention the
+# log file keeps). Relative paths in explicit load/save calls resolve the
+# same way.
+file = "settings.toml"
+# Rewrite the default file after every mutation (set/remove). Off (the
+# default) keeps writes explicit: a caller saves through the capability or
+# the bridge when it knows the values are good. On gives crash-durable
+# settings at the cost of one file write per mutation.
+autosave = false

@@ -1,0 +1,36 @@
+# Package defaults for Harrowmere UI. Runtime player preferences live in
+# settings.toml through the engine's settings capability, not in this file.
+[harrowmere_ui]
+key = "F1"
+visible_on_start = 1
+follow_camera = 1
+
+# Persistent player-option defaults. The Options panel seeds settings.toml from
+# these values only when no player preference exists yet.
+[audio]
+master_volume = 1.0
+
+[graphics]
+quality = "High"
+
+[ui]
+scale = 1.0
+verbose = false
+
+[ui.actions]
+toggle_overlay = "F1"
+
+[input.actions]
+walk_forward = "W"
+walk_back = "S"
+walk_left = "A"
+walk_right = "D"
+sprint = "LeftShift"
+interact = "E"
+crouch = "Z"
+torch = "T"
+mask = "Y"
+report_crime = "G"
+bribe = "B"
+surrender = "X"
+jump = "Space"

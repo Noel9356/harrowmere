@@ -1,0 +1,11 @@
+id = "example_species_mod"
+version = "0.1.0"
+engine_api = 1
+type = "native"
+entry = "example_species_mod"
+display_name = "Example Species Data Mod"
+description = "Sample D-MOD-2 data package adding the mossling species and a recipe."
+capabilities = []
+provides = []
+permissions = []
+requires = []

@@ -1,0 +1,15 @@
+[
+ { "id": 1, "key": "gather_herbs", "giverRole": "healer", "territoryScope": "",
+   "eventTemplateKey": "GATHER_HERBS", "repeatable": true,
+   "description": "Healer Maren of the beginner village has watched her medicine chest run bare since the last caravan. She asks any able wanderer to walk the wet meadow edge and gather three bundles of mana herb, then bring them to her cot by the well. She pays a small purse and a vial of her own brewing for every full delivery." },
+ { "id": 2, "key": "deliver_grain", "giverRole": "vendor", "territoryScope": "",
+   "eventTemplateKey": "DELIVER_GRAIN", "repeatable": true,
+   "description": "The market vendor of the frontier village is short on grain before the season turns: the farm carts run late and the bread queues grow. He bargains for five sacks of grain carried from the granary to his stall in the market square, and settles in coin and road rations the day the last sack lands on his counter." },
+ { "id": 3, "key": "the_missing_charter", "giverRole": "noble", "territoryScope": "",
+   "eventTemplateKey": "THE_MISSING_CHARTER", "repeatable": false,
+   "description": "Noble Sef of the county seat lost the village's founding charter on the road to the kingdom court, and without it the tax collector will bleed the hamlet dry. He begs a discreet traveler to recover the charter and bring it to him. Once it is found, the chain continues: the charter must then reach Scribe Aldric at the county hall for the royal seal." },
+ { "id": 4, "key": "raid_watch", "giverRole": "captain", "territoryScope": "",
+   "eventTemplateKey": "RAID_WATCH", "eventStateBinding": { "templateKey": "bandit_raid", "stateId": 201 },
+   "repeatable": true,
+   "description": "Captain Bren of the garrison cannot spare blades for every watchtower, so he hires eyes instead: stand two shifts of watch on the ridge road and report every sighting you count. The watch ends the day the bandit raid afflicting the region is finally driven off or burns itself out - whichever the fates decide first." }
+]

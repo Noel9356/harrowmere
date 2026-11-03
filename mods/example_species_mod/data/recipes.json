@@ -1,0 +1,86 @@
+[
+  {
+    "key": "craft_bandage",
+    "inputs": {
+      "cloth": 2
+    },
+    "output": "bandage",
+    "reqSkill": {
+      "CRAFTING": 2
+    },
+    "station": null
+  },
+  {
+    "key": "craft_torch",
+    "inputs": {
+      "wood": 1,
+      "cloth": 1
+    },
+    "output": "torch",
+    "reqSkill": {
+      "CRAFTING": 1
+    },
+    "station": null
+  },
+  {
+    "key": "craft_iron_sword",
+    "inputs": {
+      "iron": 3,
+      "wood": 1,
+      "tools": 1
+    },
+    "output": "iron_sword",
+    "reqSkill": {
+      "CRAFTING": 8
+    },
+    "station": null
+  },
+  {
+    "key": "craft_leather_armor",
+    "inputs": {
+      "leather_hide": 4,
+      "cloth": 1
+    },
+    "output": "leather_armor",
+    "reqSkill": {
+      "CRAFTING": 4
+    },
+    "station": null
+  },
+  {
+    "key": "craft_iron_ration",
+    "inputs": {
+      "raw_meat": 2,
+      "cloth": 1
+    },
+    "output": "iron_ration",
+    "reqSkill": {
+      "CRAFTING": 2
+    },
+    "station": null
+  },
+  {
+    "key": "craft_mana_tonic",
+    "inputs": {
+      "medicine": 2,
+      "mana_herb": 1
+    },
+    "output": "mana_tonic",
+    "reqSkill": {
+      "CRAFTING": 6,
+      "ARCANA": 5
+    },
+    "station": null
+  },
+  {
+    "key": "craft_mossling_wrap",
+    "inputs": {
+      "cloth": 1
+    },
+    "output": "bandage",
+    "reqSkill": {
+      "CRAFTING": 1
+    },
+    "station": null
+  }
+]

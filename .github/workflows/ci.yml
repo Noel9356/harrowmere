@@ -1,0 +1,60 @@
+# Harrowmere CI — the one-command Phase 4 gate, on pushes/PRs, with the full
+# three-game-year soak on a nightly schedule (README "CI" and
+# docs/phase-4-handover.md "One-command CI gate" name this workflow).
+#
+# scripts/ci.sh is the single entry point: configure (Release), build with
+# warnings-as-errors, the core CTest battery (8.1 determinism, 8.2
+# roundtrip/fuzz, 8.4 balance, the one-year PR soak), the UI CTest battery,
+# the bootstrap smoke + graph checks, the 8.4 balance measurement, and the
+# 8.5 acceptance preflight (40-scenario registry, A36, A40). The full
+# nightly soak runs through HARROWMERE_FULL_NIGHTLY=1.
+
+name: harrowmere-ci
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # 03:20 UTC daily — off the top of the hour to dodge scheduler contention.
+    - cron: "20 3 * * *"
+
+jobs:
+  battery:
+    # The schedule event runs only on the main branch's own timeline.
+    if: github.event_name != 'schedule' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HARROWMERE_FULL_NIGHTLY: ${{ github.event_name == 'schedule' && '1' || '0' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build toolchain and runtime dev packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libxfixes-dev libxrender-dev \
+            libvulkan-dev glslang-tools
+          cmake --version && ninja --version && glslangValidator --version
+
+      - name: Configure (Release)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (warnings-as-errors)
+        run: cmake --build build --parallel
+
+      - name: The one-command gate (CTest + smoke + balance + acceptance)
+        run: bash scripts/ci.sh build
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harrowmere-ci-logs
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/CMakeCache.txt
+          if-no-files-found: ignore

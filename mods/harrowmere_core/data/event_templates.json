@@ -1,0 +1,753 @@
+[
+ {
+  "id": 1,
+  "key": "MANHUNT",
+  "scale": "regional",
+  "initialStateId": 100,
+  "initialDifficulty": 5000,
+  "initialSuccessRate": 5000,
+  "maxDurationDays": 7,
+  "npcJoinPolicy": {
+   "roles": [
+    "guard",
+    "militia_veteran"
+   ],
+   "speciesBias": {}
+  },
+  "states": [
+   {
+    "stateId": 100,
+    "entryActions": [
+     {
+      "kind": "EvacuateTerritory"
+     }
+    ],
+    "exitActions": [
+     {
+      "kind": "EndEvent",
+      "success": true
+     }
+    ],
+    "objectives": [
+     {
+      "objectiveId": 1,
+      "actionType": "DAMAGE",
+      "cap": 10000
+     }
+    ],
+    "transitions": [
+     {
+      "to": 101,
+      "conditions": [
+       {
+        "kind": "TargetDead"
+       }
+      ],
+      "onFire": {
+       "kind": "EndEvent",
+       "success": true
+      }
+     },
+     {
+      "to": 101,
+      "conditions": [
+       {
+        "kind": "TargetCaptured"
+       }
+      ],
+      "onFire": {
+       "kind": "EndEvent",
+       "success": true
+      }
+     }
+    ]
+   },
+   {
+    "stateId": 101,
+    "entryActions": [],
+    "exitActions": [],
+    "objectives": [],
+    "transitions": []
+   }
+  ],
+  "actionCap": {
+   "DAMAGE": 10000,
+   "HEALING": 0,
+   "OBJECTIVE": 0
+  },
+  "actionWeight": {
+   "DAMAGE": 10000,
+   "HEALING": 0,
+   "OBJECTIVE": 0
+  },
+  "rewardTable": {
+   "xpPerContribution": 1,
+   "currencyPerContribution": 2,
+   "items": []
+  },
+  "special": {
+   "targetFromWarrant": true,
+   "culpritEarnsNothing": true
+  }
+ },
+ {
+  "id": 2,
+  "key": "bandit_raid",
+  "scale": "regional",
+  "initialStateId": 200,
+  "initialDifficulty": 3000,
+  "initialSuccessRate": 5000,
+  "maxDurationDays": 5,
+  "weatherAffinity": {
+   "storm": 2000
+  },
+  "npcJoinPolicy": {
+   "roles": [
+    "guard",
+    "militia_veteran",
+    "farmer"
+   ],
+   "speciesBias": {}
+  },
+  "states": [
+   {
+    "stateId": 200,
+    "entryActions": [
+     {
+      "kind": "SpawnTargets",
+      "speciesKey": "human",
+      "roleKey": "bandit",
+      "count": 6
+     }
+    ],
+    "exitActions": [
+     {
+      "kind": "DespawnTargets"
+     },
+     {
+      "kind": "SetRegionFlag",
+      "flag": "raided",
+      "set": true
+     }
+    ],
+    "objectives": [
+     {
+      "objectiveId": 1,
+      "actionType": "DAMAGE",
+      "cap": 10000
+     },
+     {
+      "objectiveId": 2,
+      "actionType": "HEALING",
+      "cap": 5000
+     }
+    ],
+    "transitions": [
+     {
+      "to": 201,
+      "conditions": [
+       {
+        "kind": "ActionThreshold",
+        "actionType": "DAMAGE",
+        "total": 8000
+       },
+       {
+        "kind": "TimerCondition",
+        "days": 5
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "stateId": 201,
+    "entryActions": [
+     {
+      "kind": "EndEvent",
+      "success": true
+     }
+    ],
+    "exitActions": [],
+    "objectives": [],
+    "transitions": []
+   }
+  ],
+  "actionCap": {
+   "DAMAGE": 10000,
+   "HEALING": 5000,
+   "OBJECTIVE": 0
+  },
+  "actionWeight": {
+   "DAMAGE": 8000,
+   "HEALING": 6000,
+   "OBJECTIVE": 0
+  },
+  "rewardTable": {
+   "xpPerContribution": 2,
+   "currencyPerContribution": 3,
+   "items": [
+    "mana_tonic"
+   ]
+  }
+ },
+ {
+  "id": 3,
+  "key": "GARRISON_RETURN",
+  "scale": "regional",
+  "initialStateId": 300,
+  "initialDifficulty": 2000,
+  "initialSuccessRate": 8000,
+  "maxDurationDays": 3,
+  "npcJoinPolicy": {
+   "roles": [
+    "militia_veteran",
+    "farmer",
+    "laborer"
+   ],
+   "speciesBias": {}
+  },
+  "states": [
+   {
+    "stateId": 300,
+    "entryActions": [],
+    "exitActions": [
+     {
+      "kind": "GarrisonTerritory",
+      "roleKey": "guard"
+     }
+    ],
+    "objectives": [],
+    "transitions": [
+     {
+      "to": 301,
+      "conditions": [
+       {
+        "kind": "TimerCondition",
+        "days": 2
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "stateId": 301,
+    "entryActions": [
+     {
+      "kind": "EndEvent",
+      "success": true
+     }
+    ],
+    "exitActions": [],
+    "objectives": [],
+    "transitions": []
+   }
+  ],
+  "actionCap": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 0
+  },
+  "actionWeight": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 0
+  }
+ },
+ {
+  "id": 400,
+  "key": "GATHER_HERBS",
+  "scale": "regional",
+  "initialStateId": 400,
+  "initialDifficulty": 2000,
+  "initialSuccessRate": 5000,
+  "maxDurationDays": 7,
+  "npcJoinPolicy": {
+   "roles": [
+    "player"
+   ],
+   "speciesBias": {}
+  },
+  "states": [
+   {
+    "stateId": 400,
+    "entryActions": [],
+    "exitActions": [
+     {
+      "kind": "EndEvent",
+      "success": true
+     }
+    ],
+    "objectives": [
+     {
+      "objectiveId": 1,
+      "actionType": "OBJECTIVE",
+      "cap": 3
+     }
+    ],
+    "transitions": [
+     {
+      "to": 401,
+      "conditions": [
+       {
+        "kind": "ActionThreshold",
+        "actionType": "OBJECTIVE",
+        "total": 3
+       }
+      ]
+     },
+     {
+      "to": 401,
+      "conditions": [
+       {
+        "kind": "Timer",
+        "days": 7
+       }
+      ],
+      "onFire": {
+       "kind": "EndEvent",
+       "success": false
+      }
+     }
+    ]
+   },
+   {
+    "stateId": 401,
+    "entryActions": [],
+    "exitActions": [],
+    "objectives": [],
+    "transitions": []
+   }
+  ],
+  "actionCap": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 3
+  },
+  "actionWeight": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 10000
+  },
+  "rewardTable": {
+   "xpPerContribution": 2,
+   "currencyPerContribution": 4,
+   "items": [
+    "medicine"
+   ]
+  }
+ },
+ {
+  "id": 410,
+  "key": "DELIVER_GRAIN",
+  "scale": "regional",
+  "initialStateId": 410,
+  "initialDifficulty": 1500,
+  "initialSuccessRate": 6000,
+  "maxDurationDays": 5,
+  "npcJoinPolicy": {
+   "roles": [
+    "player"
+   ],
+   "speciesBias": {}
+  },
+  "states": [
+   {
+    "stateId": 410,
+    "entryActions": [],
+    "exitActions": [
+     {
+      "kind": "EndEvent",
+      "success": true
+     }
+    ],
+    "objectives": [
+     {
+      "objectiveId": 1,
+      "actionType": "OBJECTIVE",
+      "cap": 5
+     }
+    ],
+    "transitions": [
+     {
+      "to": 411,
+      "conditions": [
+       {
+        "kind": "ActionThreshold",
+        "actionType": "OBJECTIVE",
+        "total": 5
+       }
+      ]
+     },
+     {
+      "to": 411,
+      "conditions": [
+       {
+        "kind": "Timer",
+        "days": 5
+       }
+      ],
+      "onFire": {
+       "kind": "EndEvent",
+       "success": false
+      }
+     }
+    ]
+   },
+   {
+    "stateId": 411,
+    "entryActions": [],
+    "exitActions": [],
+    "objectives": [],
+    "transitions": []
+   }
+  ],
+  "actionCap": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 5
+  },
+  "actionWeight": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 10000
+  },
+  "rewardTable": {
+   "xpPerContribution": 1,
+   "currencyPerContribution": 3,
+   "items": [
+    "iron_ration"
+   ]
+  }
+ },
+ {
+  "id": 420,
+  "key": "THE_MISSING_CHARTER",
+  "scale": "regional",
+  "initialStateId": 420,
+  "initialDifficulty": 3000,
+  "initialSuccessRate": 5000,
+  "maxDurationDays": 10,
+  "npcJoinPolicy": {
+   "roles": [
+    "player"
+   ],
+   "speciesBias": {}
+  },
+  "states": [
+   {
+    "stateId": 420,
+    "entryActions": [],
+    "exitActions": [
+     {
+      "kind": "SpawnNestedEvent",
+      "templateKey": "CHARTER_SCRIBE"
+     },
+     {
+      "kind": "EndEvent",
+      "success": true
+     }
+    ],
+    "objectives": [
+     {
+      "objectiveId": 1,
+      "actionType": "OBJECTIVE",
+      "cap": 1
+     }
+    ],
+    "transitions": [
+     {
+      "to": 421,
+      "conditions": [
+       {
+        "kind": "ActionThreshold",
+        "actionType": "OBJECTIVE",
+        "total": 1
+       }
+      ]
+     },
+     {
+      "to": 421,
+      "conditions": [
+       {
+        "kind": "Timer",
+        "days": 10
+       }
+      ],
+      "onFire": {
+       "kind": "EndEvent",
+       "success": false
+      }
+     }
+    ]
+   },
+   {
+    "stateId": 421,
+    "entryActions": [],
+    "exitActions": [],
+    "objectives": [],
+    "transitions": []
+   }
+  ],
+  "actionCap": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 1
+  },
+  "actionWeight": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 10000
+  },
+  "rewardTable": {
+   "xpPerContribution": 3,
+   "currencyPerContribution": 6,
+   "items": []
+  }
+ },
+ {
+  "id": 421,
+  "key": "CHARTER_SCRIBE",
+  "scale": "regional",
+  "initialStateId": 421,
+  "initialDifficulty": 3000,
+  "initialSuccessRate": 5000,
+  "maxDurationDays": 10,
+  "npcJoinPolicy": {
+   "roles": [
+    "player"
+   ],
+   "speciesBias": {}
+  },
+  "states": [
+   {
+    "stateId": 421,
+    "entryActions": [],
+    "exitActions": [
+     {
+      "kind": "EndEvent",
+      "success": true
+     }
+    ],
+    "objectives": [
+     {
+      "objectiveId": 1,
+      "actionType": "OBJECTIVE",
+      "cap": 1
+     }
+    ],
+    "transitions": [
+     {
+      "to": 422,
+      "conditions": [
+       {
+        "kind": "ActionThreshold",
+        "actionType": "OBJECTIVE",
+        "total": 1
+       }
+      ]
+     },
+     {
+      "to": 422,
+      "conditions": [
+       {
+        "kind": "Timer",
+        "days": 10
+       }
+      ],
+      "onFire": {
+       "kind": "EndEvent",
+       "success": false
+      }
+     }
+    ]
+   },
+   {
+    "stateId": 422,
+    "entryActions": [],
+    "exitActions": [],
+    "objectives": [],
+    "transitions": []
+   }
+  ],
+  "actionCap": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 1
+  },
+  "actionWeight": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 10000
+  },
+  "rewardTable": {
+   "xpPerContribution": 4,
+   "currencyPerContribution": 10,
+   "items": [
+    "gold_coin"
+   ]
+  }
+ },
+ {
+  "id": 430,
+  "key": "RAID_WATCH",
+  "scale": "regional",
+  "initialStateId": 430,
+  "initialDifficulty": 4000,
+  "initialSuccessRate": 5000,
+  "maxDurationDays": 10,
+  "npcJoinPolicy": {
+   "roles": [
+    "player"
+   ],
+   "speciesBias": {}
+  },
+  "states": [
+   {
+    "stateId": 430,
+    "entryActions": [],
+    "exitActions": [
+     {
+      "kind": "EndEvent",
+      "success": true
+     }
+    ],
+    "objectives": [
+     {
+      "objectiveId": 1,
+      "actionType": "OBJECTIVE",
+      "cap": 2
+     }
+    ],
+    "transitions": [
+     {
+      "to": 431,
+      "conditions": [
+       {
+        "kind": "EventState",
+        "templateKey": "bandit_raid",
+        "stateId": 201
+       }
+      ]
+     },
+     {
+      "to": 431,
+      "conditions": [
+       {
+        "kind": "ActionThreshold",
+        "actionType": "OBJECTIVE",
+        "total": 2
+       }
+      ]
+     },
+     {
+      "to": 431,
+      "conditions": [
+       {
+        "kind": "Timer",
+        "days": 10
+       }
+      ],
+      "onFire": {
+       "kind": "EndEvent",
+       "success": false
+      }
+     }
+    ]
+   },
+   {
+    "stateId": 431,
+    "entryActions": [],
+    "exitActions": [],
+    "objectives": [],
+    "transitions": []
+   }
+  ],
+  "actionCap": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 2
+  },
+  "actionWeight": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 10000
+  },
+  "rewardTable": {
+   "xpPerContribution": 3,
+   "currencyPerContribution": 8,
+   "items": [
+    "bandage"
+   ]
+  }
+ },
+ {
+  "id": 9,
+  "key": "BATTLE",
+  "scale": "regional",
+  "initialStateId": 200,
+  "initialDifficulty": 5000,
+  "initialSuccessRate": 5000,
+  "maxDurationDays": 1,
+  "npcJoinPolicy": {
+   "roles": [
+    "guard",
+    "militia_veteran"
+   ],
+   "speciesBias": {}
+  },
+  "states": [
+   {
+    "stateId": 200,
+    "entryActions": [],
+    "exitActions": [
+     {
+      "kind": "EndEvent",
+      "success": true
+     }
+    ],
+    "objectives": [
+     {
+      "objectiveId": 1,
+      "actionType": "DAMAGE",
+      "cap": 0
+     }
+    ],
+    "transitions": [
+     {
+      "to": 201,
+      "conditions": [
+       {
+        "kind": "Timer",
+        "days": 1
+       }
+      ],
+      "onFire": {
+       "kind": "EndEvent",
+       "success": true
+      }
+     }
+    ]
+   },
+   {
+    "stateId": 201,
+    "entryActions": [],
+    "exitActions": [],
+    "objectives": [],
+    "transitions": []
+   }
+  ],
+  "actionCap": {
+   "DAMAGE": 0,
+   "HEALING": 0,
+   "OBJECTIVE": 0
+  },
+  "actionWeight": {
+   "DAMAGE": 10000,
+   "HEALING": 0,
+   "OBJECTIVE": 0
+  },
+  "special": {
+   "dualTargetGroups": true
+  }
+ }
+]

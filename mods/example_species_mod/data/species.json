@@ -1,0 +1,21 @@
+[
+  {
+    "id": 9,
+    "key": "mossling",
+    "sapient": true,
+    "lifespan_years": 240,
+    "statMultiplier": {
+      "STRENGTH": 0.8,
+      "DEFENCE": 1.0,
+      "AGILITY": 1.3,
+      "INTELLIGENCE": 1.4,
+      "ENDURANCE": 1.1,
+      "PERCEPTION": 1.5
+    },
+    "appearance": "small moss-covered woodland folk",
+    "darkvision": false,
+    "xenophobiaBias": 0.0,
+    "infectableVampire": true,
+    "damageTakenMultiplier": 1.0
+  }
+]

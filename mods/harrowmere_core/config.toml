@@ -1,0 +1,23 @@
+# harrowmere_core package defaults - the game's configuration-flavored
+# tunables ([harrowmere] section only, D-DATA-1 §4.3).
+#
+# A package defaults file may NEVER define [engine], [providers],
+# [permissions], [diagnostics], [trust] or [scene] - those are assembly-owned
+# (config/harrowmere.toml). Rule values (everything a modder would mod:
+# species, items, laws, events...) are JSON data under data/, not TOML keys.
+#
+# These are config knobs, not Appendix A rows (common.md §Appendix A): the
+# numbers live here so a deployment can override them per assembly, and the
+# mod's config_keys in mod.toml declares every key this file defines.
+
+[harrowmere]
+# Sim ticks per real second - the fixed-update heartbeat the sim rides (§4.4).
+tick_rate = 10
+# TIME_SCALE (D-TIME-1): game seconds advanced per real second. 60 = one real
+# second is one game minute; a 30-game-day evidence window is ~12 real hours.
+time_scale = 60
+# Autosave cadence in game hours (task 7.1 consumes it).
+autosave_game_hours = 6
+# World seed: 0 = a random seed chosen at first launch and then persisted by
+# the save system (task 7.1). Any non-zero value pins worldgen deterministically.
+seed = 0
