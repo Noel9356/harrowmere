@@ -72,6 +72,14 @@ set(HARROWMERE_TEST_SOURCES
     test_quests.cpp              # task 6.4 - quests as event instances, payouts, the checklist
     test_society_views.cpp       # task 7.3b - the society view fills (the live whitelist)
     test_save_load.cpp           # task 7.1 - the roundtrip, dirty flags, RNG continuation, atomic tmp, version refusal
+    test_terrain.cpp             # task 5.1.2 - terrain relief: heightAt purity, determinism, region-edge gradient cap
+    test_capture_scenarios.cpp   # task 5.1.1 - the capture suite: scenario list, PNG smoke, budget report parser
+    capture_scenarios.cpp        # task 5.1.1 - the capture suite implementation (scenario list, run, report parse)
+    test_character_visuals.cpp   # task 5.1.3 - characters beyond the token: silhouette, yaw, bob, corpse, no-sim-state
+    test_atmosphere.cpp          # task 5.1.4 - sky/sun/weather: sun tracks phase, anchors interpolate, fog, exposure, season
+    test_scatter.cpp             # task 5.2.1 - scatter: determinism, density, water/slope rejection, footprints, cap, save/load
+    test_borders.cpp             # task 5.2.2 - water/coasts/borders: ribbon projection, owner color, recolor, safe style, no-sim-writes
+    test_image_budget.cpp        # task 5.3.1 - the image budget gate: percentiles, escalation ladder, profiler citations
     test_soak.cpp                # task 8.3 - the invariants hold (1-game-year smoke; the nightly run drives soak_main)
     test_balance.cpp             # task 8.4 - the balance verdicts (level curve, event equilibrium, conviction rates by law set)
     soak_main.cpp                # task 8.3 - the headless harness (library mode here: HARROWMERE_SOAK_NO_MAIN)

@@ -24,7 +24,7 @@ description = "Harrowmere's authoritative simulation: world model, characters, j
 # demand alone leaves the pass idle. The mod code keeps its degrade-if-absent
 # guards (the probe, the sink's null checks) so a build without the provider
 # still runs the sim; the RUN, not the code, pins the visual contract.
-capabilities = ["logging", "scene", "input", "lighting", "pbr_direct_diffuse"]
+capabilities = ["logging", "scene", "input", "lighting", "pbr_direct_diffuse", "screenshot"]
 provides = ["harrowmere.core"]         # native mods PROVIDE through mod.toml; the compiled manifest must agree
 optional_capabilities = ["physics", "audio", "animation", "asset"]  # degrade-if-absent is the contract (§4.0)
 permissions = ["filesystem.write"]     # saves (task 7.1) write into the user's save directory

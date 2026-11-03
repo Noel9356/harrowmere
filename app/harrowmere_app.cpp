@@ -52,9 +52,14 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -317,6 +322,50 @@ FramePacing readPacingConfiguration(
     return pacing;
 }
 
+// ---- capture scenario setup (task 5.1.1 wet-mode integration) ----------------
+//
+// The capture suite's pinned scenario list (tests/capture_scenarios.cpp) is
+// the authority for the eight scenarios' setups. The app needs the same
+// setup data to stage --set overrides for --capture-scenario <name>, but the
+// capture module lives in the test binary — not linked into the runtime mod.
+// Rather than move the capture module into the mod (a bigger refactor), the
+// app carries a small inline mirror of the setup structs. The two tables
+// are pinned by the same card (5.1.1) and must agree; the capture suite's
+// TestCapture_ScenarioListComplete is the canonical assertion.
+struct CaptureScenarioSetup
+{
+    std::uint64_t seed = 0;
+    double quitAfterSeconds = 1.0;
+    double timeOfDayGameHours = 10.0;
+    std::uint32_t weatherKind = 0;
+    bool panelsOpen = false;
+};
+
+std::optional<CaptureScenarioSetup> resolveCaptureScenario(
+    const std::string &name
+)
+{
+    // The pinned seed (CAPTURE_SUITE_SEED = 20261103, capture_scenarios.hpp).
+    constexpr std::uint64_t kSeed = 20261103ull;
+    if (name == "spawn_day")
+        return CaptureScenarioSetup{kSeed, 1.0, 10.0, 0, false};
+    if (name == "spawn_night")
+        return CaptureScenarioSetup{kSeed, 1.0, 2.0, 0, false};
+    if (name == "walk_village")
+        return CaptureScenarioSetup{kSeed, 1.0, 12.0, 0, false};
+    if (name == "walk_frontier")
+        return CaptureScenarioSetup{kSeed, 1.0, 14.0, 0, false};
+    if (name == "coast")
+        return CaptureScenarioSetup{kSeed, 1.0, 11.0, 0, false};
+    if (name == "rain")
+        return CaptureScenarioSetup{kSeed, 1.0, 13.0, 2, false};
+    if (name == "panels_open")
+        return CaptureScenarioSetup{kSeed, 1.0, 10.0, 0, true};
+    if (name == "corpse_aftermath")
+        return CaptureScenarioSetup{kSeed, 1.0, 18.0, 0, false};
+    return std::nullopt;
+}
+
 void printUsage(
     std::ostream &stream
 )
@@ -341,6 +390,14 @@ void printUsage(
            << "                        every active component with its capabilities, permissions\n"
            << "                        and start order, plus the event subscription map once a\n"
            << "                        run would have one (mod development; exit 0 on success)\n"
+           << "  --capture-scenario <name>\n"
+           << "                        run one capture-suite scenario (spawn_day, spawn_night,\n"
+           << "                        walk_village, walk_frontier, coast, rain, panels_open,\n"
+           << "                        corpse_aftermath): stages the scenario's seed, time of\n"
+           << "                        day, weather, panels and quit_after_seconds overrides,\n"
+           << "                        forces frame-time measurement, and writes\n"
+           << "                        frame_percentiles.txt into the screenshot output\n"
+           << "                        directory at shutdown (task 5.1.1 wet-mode integration)\n"
            << "  --version             print the engine version and exit\n"
            << "  --help                print this help and exit\n";
 }
@@ -364,6 +421,8 @@ int HarrowmereApp::run(
     bool haveSceneFile = false;
     bool validateOnly  = false;
     bool printGraph    = false;
+    bool captureMode   = false;
+    std::string captureScenario;
     std::vector<std::string> stagedOverrides;
 
     for (int index = 1; index < argumentCount; ++index)
@@ -410,12 +469,46 @@ int HarrowmereApp::run(
             // touched.
             validateOnly = true;
             printGraph   = true;
+        } else if (argument == "--capture-scenario" && hasValue)
+        {
+            captureScenario = arguments[++index];
         } else
         {
             std::cerr << "harrowmere: unknown or incomplete argument '" << argument << "'\n";
             printUsage(std::cerr);
             return 2;
         }
+    }
+
+    // ---- capture-scenario mode (task 5.1.1 wet-mode integration) -------------
+    // When --capture-scenario <name> is set, the app stages the scenario's
+    // pinned setup (seed, time of day, weather, panels, quit_after_seconds)
+    // as --set overrides, forces frame-time measurement on, and at shutdown
+    // writes frame_percentiles.txt into the screenshot output directory. The
+    // capture suite (tests/capture_scenarios.cpp) calls this flag per
+    // scenario instead of spelling out every --set override.
+    if (!captureScenario.empty())
+    {
+        const auto scenarioSetup = resolveCaptureScenario(captureScenario);
+        if (!scenarioSetup.has_value())
+        {
+            std::cerr << "harrowmere: unknown capture scenario '" << captureScenario << "'\n"
+                      << "  known scenarios: spawn_day, spawn_night, walk_village, walk_frontier, "
+                      << "coast, rain, panels_open, corpse_aftermath\n";
+            return 2;
+        }
+        const auto &s = *scenarioSetup;
+        stagedOverrides.emplace_back("engine.quit_after_seconds=" + std::to_string(s.quitAfterSeconds));
+        stagedOverrides.emplace_back("harrowmere.seed=" + std::to_string(s.seed));
+        stagedOverrides.emplace_back("harrowmere.time_of_day_game_hours=" + std::to_string(s.timeOfDayGameHours));
+        stagedOverrides.emplace_back("harrowmere.weather_kind=" + std::to_string(s.weatherKind));
+        stagedOverrides.emplace_back(std::string("harrowmere_ui.visible_on_start=") + (s.panelsOpen ? "1" : "0"));
+        stagedOverrides.emplace_back("harrowmere_ui.follow_camera=1");
+        // Force the frame-time measurement on for the capture run: the
+        // percentile report at shutdown reads from the frameSamples ring
+        // buffer, which is only populated when diagnosticsEnabled is true.
+        stagedOverrides.emplace_back("diagnostics.latency_report=true");
+        captureMode = true;
     }
 
     kernel.setConfigurationFile(configurationFile);
@@ -992,6 +1085,61 @@ int HarrowmereApp::run(
     } catch (const std::exception &)
     {
         // The report is diagnostic; never turn it into a run failure.
+    }
+
+    // ---- capture-scenario frame_percentiles.txt writer (task 5.1.1) ----------
+    // In capture mode, write the frame percentiles into the screenshot
+    // output directory so the capture suite's runSingleScenario can read
+    // them back. The suite's parser (parseBudgetReport) reads the same
+    // shape (p50Ms / p95Ms / frameSamples) the capture module's
+    // serializeBudgetReport produces; this writer matches the per-row
+    // block shape so the parser's extractDouble/extractUint64 helpers find
+    // the fields.
+    if (captureMode && iterations > 0 && renderer != nullptr && frameSampleCount > 0)
+    {
+        try
+        {
+            std::vector<double> ordered(
+                frameSamples.begin(), frameSamples.begin() + static_cast<std::ptrdiff_t>(frameSampleCount)
+            );
+            std::sort(ordered.begin(), ordered.end());
+            const auto percentile = [&ordered](std::size_t fraction) {
+                const std::size_t index = std::min(ordered.size() - 1, ordered.size() * fraction / 100);
+                return ordered[index];
+            };
+            const double p50Ms = percentile(50) * 1000.0;
+            const double p95Ms = percentile(95) * 1000.0;
+            // Resolve the screenshot output directory from the layered
+            // configuration (the capture suite stages it via --set
+            // screenshot.output_directory=...).
+            std::string outputDir;
+            try
+            {
+                const auto v = kernel.configuration().stringValue("screenshot", "output_directory");
+                if (v.has_value())
+                    outputDir = *v;
+            } catch (const std::exception &)
+            {
+            }
+            if (!outputDir.empty())
+            {
+                std::filesystem::path dirPath(outputDir);
+                std::error_code ec;
+                std::filesystem::create_directories(dirPath, ec);
+                std::ofstream out(dirPath / "frame_percentiles.txt");
+                if (out)
+                {
+                    out << "{ \"name\": \"" << captureScenario << "\""
+                        << ", \"p50Ms\": " << p50Ms
+                        << ", \"p95Ms\": " << p95Ms
+                        << ", \"frameSamples\": " << frameSampleCount
+                        << ", \"gateAsserted\": false }\n";
+                }
+            }
+        } catch (const std::exception &)
+        {
+            // The percentile file is diagnostic; never a run failure.
+        }
     }
 
     kernel.stop();

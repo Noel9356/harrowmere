@@ -79,7 +79,17 @@ SceneBridge::SceneBridge(
 SceneBridge::SceneBridge(
     WorldViewForBridge &world, ClockViewForBridge &clock, SceneRegistrySink &sink, CharactersViewForBridge *characters
 )
-    : world_(world), clock_(clock), sink_(sink), characters_(characters)
+    : SceneBridge(world, clock, sink, characters, nullptr)
+{}
+
+SceneBridge::SceneBridge(
+    WorldViewForBridge &world,
+    ClockViewForBridge &clock,
+    SceneRegistrySink &sink,
+    CharactersViewForBridge *characters,
+    const TerrainField *terrain
+)
+    : world_(world), clock_(clock), sink_(sink), characters_(characters), terrain_(terrain)
 {}
 
 SceneBridge::~SceneBridge() = default;
@@ -91,6 +101,11 @@ void SceneBridge::onFrame()
     sun_updated_last_frame_      = false;
     sky_tint_updated_last_frame_ = false;
 
+    // Phase 5: publish the terrain mesh once, before any other object work.
+    // The mesh is the scene's ground claim (replacing scene.toml's flat
+    // plane); it must exist before characters/corpses so they sit on the
+    // land, not inside it.
+    publishTerrainIfNeeded();
     buildPendingQueueIfNeeded();
     processPendingCreations();
     syncJailCages();
@@ -102,6 +117,24 @@ void SceneBridge::onFrame()
     drainCharacterCreations();
     updateSunIfPhaseChanged();
     updateSkyTintIfWeatherChanged();
+}
+
+void SceneBridge::publishTerrainIfNeeded()
+{
+    if (terrain_published_ || terrain_ == nullptr)
+        return;
+    const auto mesh = terrain_->meshGrid();
+    if (mesh.empty())
+        return;
+    // The mesh is a flat (x, y, z) triple array over a
+    // TERRAIN_GRID_STEPS x TERRAIN_GRID_STEPS grid (A-148). The sink's
+    // spawnTerrainMesh takes the vertices + the grid resolution; the
+    // production adapter forwards to the scene capability (or logs until
+    // the engine grows the seam). The handle is stored for a future
+    // remove-on-rebuild path (the terrain is static per run, so the handle
+    // is currently fire-and-forget).
+    (void)sink_.spawnTerrainMesh(mesh, TERRAIN_GRID_STEPS);
+    terrain_published_ = true;
 }
 
 void SceneBridge::buildPendingQueueIfNeeded()

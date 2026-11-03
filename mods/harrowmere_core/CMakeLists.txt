@@ -153,6 +153,33 @@ add_library(harrowmere_core_objects OBJECT
     # whitelist and the EventsView (the tested free functions; rebuildViews
     # is the thin caller)
     src/bridge/society_view.cpp
+    # task 5.1.2 - terrain relief from the world model: the deterministic
+    # heightfield (D-IMG-1: height is presentation; heightAt is the ONE
+    # height door). The bridge (5.1.2's consumer) and 5.2.1 scatter / 5.2.2
+    # water / 6.1.1 camera floor all read through this one function.
+    src/bridge/terrain.cpp
+    # task 5.1.3 - characters beyond the token: per-species silhouette
+    # primitives (A-153), yaw from movement direction, walk bob from
+    # traveled distance (A-154). Pure-data derivation; the bridge composes
+    # the visual AFTER reading the sim's position, never before writing it.
+    src/bridge/character_visuals.cpp
+    # task 5.1.4 - sky, sun & weather on screen: sun direction/intensity
+    # from the day/night phase, sky gradient keyed to that phase (A-155
+    # anchors interpolated), fog density/tint from weather state, exposure
+    # tone target (A-156 floor/ceiling), bloom strength (A-157). D-IMG-3:
+    # no new engine module, no kernel edit — the renderer's existing path
+    # carries it.
+    src/bridge/atmosphere.cpp
+    # task 5.2.1 - scatter: vegetation, rock & settlement props placed
+    # deterministically from (seed, climate, terrain) via a splitmix64
+    # hash (D-IMG-2: NOT the worldgen RNG stream). Per-climate density
+    # tables, A-150 settlement footprints, A-152 per-view cap.
+    src/bridge/scatter.cpp
+    # task 5.2.2 - water, coasts & borders on the land: the sea-level
+    # plane (A-151), territory border ribbons projected onto the heightfield
+    # (A-159 lift), owner-colored from the faction palette (A-158),
+    # event-driven recolor on TerritoryChanged (no polling).
+    src/bridge/borders.cpp
     # task 6.4 - quests: the quest rows (quests.json loader), the content
     # checklist validator and the two play verbs (start + deliver) over the
     # event engine — a quest IS an event instance, no separate payout path

@@ -1,0 +1,38 @@
+{
+  "props": [
+    { "key": "pine",    "primitive": "cone",   "scaleM": [3.0, 9.0] },
+    { "key": "boulder", "primitive": "box",    "scaleM": [0.4, 2.2] },
+    { "key": "house",   "primitive": "box",    "scaleM": [4.0, 7.0] },
+    { "key": "shrub",   "primitive": "sphere", "scaleM": [0.3, 1.0] },
+    { "key": "dead_tree", "primitive": "cone", "scaleM": [2.0, 5.0] }
+  ],
+  "climate": {
+    "MOUNTAIN": [
+      { "prop": "boulder", "perHectare": 6, "maxSlope": 0.9 },
+      { "prop": "pine",    "perHectare": 2, "maxSlope": 0.6 },
+      { "prop": "dead_tree", "perHectare": 1, "maxSlope": 0.8 }
+    ],
+    "FOREST": [
+      { "prop": "pine",  "perHectare": 5, "maxSlope": 0.5 },
+      { "prop": "shrub", "perHectare": 9, "maxSlope": 0.7 },
+      { "prop": "boulder", "perHectare": 1, "maxSlope": 0.9 }
+    ],
+    "TEMPERATE": [
+      { "prop": "shrub", "perHectare": 7, "maxSlope": 0.4 },
+      { "prop": "pine",  "perHectare": 2, "maxSlope": 0.5 },
+      { "prop": "boulder", "perHectare": 1, "maxSlope": 0.8 }
+    ],
+    "SWAMP": [
+      { "prop": "dead_tree", "perHectare": 4, "maxSlope": 0.3 },
+      { "prop": "shrub",     "perHectare": 6, "maxSlope": 0.4 }
+    ],
+    "COASTAL": [
+      { "prop": "shrub",  "perHectare": 3, "maxSlope": 0.4 },
+      { "prop": "boulder", "perHectare": 2, "maxSlope": 0.7 }
+    ]
+  },
+  "settlements": {
+    "VILLAGE": { "props": ["house"], "footprintRow": "A-150", "footprintMin": 8, "footprintMax": 14 },
+    "CITY":    { "props": ["house"], "footprintRow": "A-150", "footprintMin": 31, "footprintMax": 60 }
+  }
+}

@@ -49,6 +49,8 @@
 #include "engine/kernel/filesystem_utilities.hpp" // engine::executableDirectory (0.4's package-dir resolution)
 #include "engine/kernel/mod_discovery.hpp"        // deterministic package discovery for 7.5 data overlays
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <iterator>
 #include <memory>
@@ -76,6 +78,10 @@
 #include "data/registry.hpp"
 #include "data/mod_overrides.hpp"
 #include "bridge/scene_bridge.hpp"
+#include "bridge/terrain.hpp"          // task 5.1.2: the deterministic heightfield (heightAt is the ONE height door)
+#include "bridge/scatter.hpp"          // task 5.2.1: scatter placements (data + seed)
+#include "bridge/borders.hpp"          // task 5.2.2: water + territory borders
+#include "bridge/atmosphere.hpp"       // task 5.1.4: sky/sun/weather on screen
 #include "bridge/player_view.hpp"      // task 2.8: the step-13 PlayerView fill (the tested free function)
 #include "bridge/society_view.hpp"     // task 7.3b: the society view fills (the tested free functions)
 #include "bridge/store_adapters.hpp"   // the 7.2 runtime CharactersView over the stores (3.1's recipe)
@@ -255,8 +261,20 @@ public:
         primaryRegion_ = region;
     }
 
+    // Phase 5: when false, territories() returns empty — the bridge creates
+    // no debug markers (territory boxes + safe-zone discs). Used when the
+    // terrain mesh is present so the markers don't clutter the scene.
+    void setShowMarkers(
+        bool show
+    ) noexcept
+    {
+        showMarkers_ = show;
+    }
+
     std::vector<TerritoryDesc> territories() const override
     {
+        if (!showMarkers_)
+            return {}; // Phase 5: suppress debug markers when terrain is active
         std::vector<TerritoryDesc> out;
         out.reserve(store_.territoryCount());
         for (const auto &[id, territory] : store_.territories())
@@ -283,8 +301,10 @@ public:
 private:
     const world::WorldStore &store_;
     const world::Region *primaryRegion_;
+    bool showMarkers_ = true; // Phase 5: false = suppress debug markers
 };
 
+// ClockBridgeView — the runtime clock read for the bridge (dayPhase01).
 class ClockBridgeView final : public bridge::ClockViewForBridge
 {
 public:
@@ -389,6 +409,155 @@ public:
         sun.direction[2] = direction[2];
         sun.intensity    = intensity;
         lighting_->setSunLight(sun);
+    }
+
+    // Phase 5: spawn a sphere (character presence). The scene registry's
+    // sphere primitive takes radius in size.x.
+    Handle spawnSphere(
+        const Position &center, float radius, const std::array<float, 3> &tint
+    ) override
+    {
+        if (scene_ == nullptr)
+            return NULL_HANDLE;
+        engine::SceneObjectDescriptor object;
+        object.type       = engine::scene_object_type::sphere;
+        object.position   = {static_cast<float>(center.x), static_cast<float>(center.y), static_cast<float>(center.z)};
+        object.size       = {radius, radius, radius};
+        object.albedo     = tint;
+        object.roughness  = 0.6f;
+        const auto handle = scene_->addObject(object);
+        return handle == engine::SceneCapability::invalidObject ? NULL_HANDLE : static_cast<Handle>(handle);
+    }
+
+    // Phase 5: spawn the terrain mesh. The bridge passes a flat (x, y, z)
+    // triple array over a gridSteps x gridSteps grid. This override converts
+    // it to a triangle mesh (vertices with normals + indices), registers it
+    // via addMesh, and adds a mesh scene object that instances it.
+    //
+    // The input grid is TERRAIN_GRID_STEPS (512) — too dense for software
+    // raster (lavapipe). We subsample to a coarser grid (64x64) by striding
+    // through the input. The relief is still visible; the triangle count
+    // drops from ~524K to ~8K.
+    Handle spawnTerrainMesh(
+        const std::vector<double> &vertices, std::uint32_t gridSteps
+    ) override
+    {
+        if (scene_ == nullptr || gridSteps < 2 || vertices.empty())
+            return NULL_HANDLE;
+
+        // Subsample to a coarser grid for the actual mesh.
+        constexpr std::uint32_t kCoarseSteps = 128;
+        const std::uint32_t stride           = std::max(1u, gridSteps / kCoarseSteps);
+        const std::uint32_t coarseSteps      = std::min(kCoarseSteps, (gridSteps + stride - 1) / stride);
+
+        // Build the triangle mesh: coarseSteps x coarseSteps vertices.
+        engine::SceneMeshDescriptor mesh;
+        mesh.vertices.reserve(static_cast<std::size_t>(coarseSteps) * coarseSteps * 6);
+        mesh.indices.reserve(static_cast<std::size_t>(coarseSteps - 1) * (coarseSteps - 1) * 6);
+
+        // First pass: positions (subsampled).
+        for (std::uint32_t row = 0; row < coarseSteps; ++row)
+        {
+            for (std::uint32_t col = 0; col < coarseSteps; ++col)
+            {
+                const std::uint32_t srcRow = std::min(row * stride, gridSteps - 1);
+                const std::uint32_t srcCol = std::min(col * stride, gridSteps - 1);
+                const std::size_t idx      = (static_cast<std::size_t>(srcRow) * gridSteps + srcCol) * 3;
+                if (idx + 2 >= vertices.size())
+                    continue;
+                mesh.vertices.push_back(static_cast<float>(vertices[idx + 0])); // x
+                mesh.vertices.push_back(static_cast<float>(vertices[idx + 1])); // y
+                mesh.vertices.push_back(static_cast<float>(vertices[idx + 2])); // z
+                mesh.vertices.push_back(0.0f);                                  // normal x (computed in second pass)
+                mesh.vertices.push_back(1.0f);                                  // normal y
+                mesh.vertices.push_back(0.0f);                                  // normal z
+            }
+        }
+
+        // Compute normals via central difference on the coarse grid.
+        for (std::uint32_t row = 0; row < coarseSteps; ++row)
+        {
+            for (std::uint32_t col = 0; col < coarseSteps; ++col)
+            {
+                const std::size_t vi = (static_cast<std::size_t>(row) * coarseSteps + col) * 6;
+                if (vi + 5 >= mesh.vertices.size())
+                    continue;
+                auto pos = [&](int r, int c) -> std::array<float, 3> {
+                    r                    = std::clamp(r, 0, static_cast<int>(coarseSteps) - 1);
+                    c                    = std::clamp(c, 0, static_cast<int>(coarseSteps) - 1);
+                    const std::size_t ni = (static_cast<std::size_t>(r) * coarseSteps + c) * 6;
+                    return {mesh.vertices[ni], mesh.vertices[ni + 1], mesh.vertices[ni + 2]};
+                };
+                const auto pL  = pos(static_cast<int>(row), static_cast<int>(col) - 1);
+                const auto pR  = pos(static_cast<int>(row), static_cast<int>(col) + 1);
+                const auto pD  = pos(static_cast<int>(row) - 1, static_cast<int>(col));
+                const auto pU  = pos(static_cast<int>(row) + 1, static_cast<int>(col));
+                const float dx = (pR[1] - pL[1]) * 0.5f;
+                const float dz = (pU[1] - pD[1]) * 0.5f;
+                float nx = -dx, ny = 1.0f, nz = -dz;
+                const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
+                if (len > 0.0f)
+                {
+                    nx /= len;
+                    ny /= len;
+                    nz /= len;
+                }
+                mesh.vertices[vi + 3] = nx;
+                mesh.vertices[vi + 4] = ny;
+                mesh.vertices[vi + 5] = nz;
+            }
+        }
+
+        // Build indices: two triangles per grid cell (CCW winding).
+        for (std::uint32_t row = 0; row < coarseSteps - 1; ++row)
+        {
+            for (std::uint32_t col = 0; col < coarseSteps - 1; ++col)
+            {
+                const std::uint32_t v00 = row * coarseSteps + col;
+                const std::uint32_t v10 = row * coarseSteps + col + 1;
+                const std::uint32_t v01 = (row + 1) * coarseSteps + col;
+                const std::uint32_t v11 = (row + 1) * coarseSteps + col + 1;
+                // Triangle 1: v00, v01, v10
+                mesh.indices.push_back(v00);
+                mesh.indices.push_back(v01);
+                mesh.indices.push_back(v10);
+                // Triangle 2: v10, v01, v11
+                mesh.indices.push_back(v10);
+                mesh.indices.push_back(v01);
+                mesh.indices.push_back(v11);
+            }
+        }
+
+        // Register the mesh.
+        const auto meshHandle = scene_->addMesh("terrain", mesh);
+        if (meshHandle == engine::SceneCapability::invalidMesh)
+            return NULL_HANDLE;
+
+        // Add a mesh scene object that instances it. The size is the
+        // bounding-box half extents (the registry computes these from the
+        // mesh, but we need to set them for the tracing proxy).
+        engine::SceneObjectDescriptor object;
+        object.type       = engine::scene_object_type::mesh;
+        object.meshHandle = meshHandle;
+        // The terrain spans [0, worldExtent] on x/z; y range is ~[0, 120].
+        const float halfExtent = static_cast<float>(vertices.size() >= 3 ? vertices[0] : 8000.0); // rough
+        object.size            = {halfExtent, 60.0f, halfExtent};                                 // proxy box
+        object.albedo          = {0.20f, 0.35f, 0.12f}; // grass green (fallback if no texture)
+        object.roughness       = 0.95f;
+        object.textureSet      = "grass"; // PBR texture set (assets/textures/grass/)
+        object.uvScale         = 64.0f;   // tile the 512px texture every 64m
+        const auto handle      = scene_->addObject(object);
+        return handle == engine::SceneCapability::invalidObject ? NULL_HANDLE : static_cast<Handle>(handle);
+    }
+
+    // Phase 2: remove an object (character despawn, corpse decay).
+    void removeObject(
+        Handle handle
+    ) override
+    {
+        if (scene_ == nullptr || handle == NULL_HANDLE)
+            return;
+        scene_->removeObject(static_cast<engine::SceneCapability::ObjectHandle>(handle));
     }
 
     void setSkyTint(
@@ -1555,10 +1724,107 @@ public:
                     && (npcs_.get(id).migrating || npcs_.get(id).currentIntent.kind != NpcIntentKind::None);
             }
         );
+        // ---- Phase 5: build the terrain field from the worldgen seed + climate grid ----
+        // D-IMG-1: height is presentation. The TerrainField is built once from
+        // the seed + region climate grid (1.6.1's output) and passed to the
+        // bridge. The bridge publishes its meshGrid() once on the first frame
+        // via sink_.spawnTerrainMesh() — the production adapter converts it to
+        // a triangle mesh and registers it with the scene registry.
+        std::vector<world::Climate> climatesVec(static_cast<std::size_t>(REGION_COUNT), world::Climate::TEMPERATE);
+        for (const auto &[id, region] : world_->regions())
+        {
+            if (id < REGION_COUNT)
+                climatesVec[id] = region.climate;
+        }
+        terrainField_ = std::make_unique<bridge::TerrainField>(seed, climatesVec);
+
+        // Phase 5: build the scatter field (vegetation, rocks, settlement props).
+        // D-IMG-2: scatter is data + seed. The ScatterField is built from the
+        // same seed + climate grid + terrain field + scatter tables.
+        bridge::ScatterTables scatterTables;
+        if (bridge::loadScatterTables(std::filesystem::path(dataDirectory_), scatterTables))
+        {
+            scatterField_ = std::make_unique<bridge::ScatterField>(seed, climatesVec, *terrainField_, scatterTables);
+        }
+
+        // Phase 5: build the borders field (water + territory ribbons).
+        bordersField_ = std::make_unique<bridge::BordersField>();
+        bordersField_->setTerrain(terrainField_.get());
+        bordersField_->setWaterExtent(harrowmere::TERRAIN_WORLD_EXTENT_M);
+        // Populate border ribbons from the territory tree.
+        for (const auto &[id, territory] : world_->territories())
+        {
+            if (territory.type == TerritoryType::KINGDOM || territory.type == TerritoryType::EMPIRE)
+                continue;
+            bridge::BorderRibbon r;
+            r.id          = id;
+            r.type        = territory.type;
+            r.owner       = 0;
+            r.safe        = territory.safe;
+            const auto rc = world::regionCenter(territory.region);
+            r.polygon     = bridge::regionBoxPolygon(rc, static_cast<double>(REGION_SIZE_M) * 0.5);
+            bordersField_->upsertRibbon(r);
+        }
+
+        // Phase 5: when terrain is present, suppress the Phase-1 debug markers
+        // (territory boxes + safe-zone discs). They were designed for the flat-
+        // plane debug view; with the terrain mesh they clutter the scene. The
+        // territory data is still available to the sim through WorldStore — only
+        // the bridge's visual markers are suppressed.
+        if (terrainField_)
+        {
+            bridgeWorld_->setShowMarkers(false);
+        }
         bridge_ = std::make_unique<bridge::SceneBridge>(
-            *bridgeWorld_, *bridgeClock_, *bridgeSink_, storeCharacterView_.get()
+            *bridgeWorld_, *bridgeClock_, *bridgeSink_, storeCharacterView_.get(), terrainField_.get()
         );
 
+        //        // Phase 5: publish scatter placements as scene objects. Each placement
+        //        // becomes a box/sphere/cone primitive at the terrain height. The cap
+        //        // is A-152 (12,000) but the scene registry's max_objects is 128
+        //        // (A-130) — publish only the nearest N to the player so the registry
+        //        // doesn't overflow.
+        //        if (scatterField_ && scene_ != nullptr)
+        //        {
+        //            const auto &placements = scatterField_->placements();
+        //            const auto playerPos = player_.position;
+        //            // Sort by distance to player, take the nearest 40 (the registry
+        //            // has 128 slots, ~69 used by Phase-1 markers, leaving ~59).
+        //            std::vector<std::pair<double, std::size_t>> byDist;
+        //            byDist.reserve(placements.size());
+        //            for (std::size_t i = 0; i < placements.size(); ++i)
+        //            {
+        //                const auto &p = placements[i];
+        //                const double dx = p.position.x - playerPos.x;
+        //                const double dz = p.position.z - playerPos.z;
+        //                byDist.emplace_back(dx * dx + dz * dz, i);
+        //            }
+        //            std::sort(byDist.begin(), byDist.end());
+        //            const std::size_t scatterCap = 0; // disabled: dark scatter objects looked like floating black
+        //            cubes for (std::size_t i = 0; i < scatterCap; ++i)
+        //            {
+        //                const auto &p = placements[byDist[i].second];
+        //                // Natural colors per prop type: trees dark green, boulders
+        //                // gray, houses warm brown, shrubs olive, dead trees dark brown.
+        //                std::array<float, 3> propColor = {0.2f, 0.35f, 0.12f}; // default dark green
+        //                if (p.propIndex < 5)
+        //                {
+        //                    switch (p.propIndex)
+        //                    {
+        //                        case 0: propColor = {0.12f, 0.30f, 0.08f}; break; // pine: dark forest green
+        //                        case 1: propColor = {0.38f, 0.36f, 0.32f}; break; // boulder: granite gray
+        //                        case 2: propColor = {0.42f, 0.28f, 0.15f}; break; // house: warm timber brown
+        //                        case 3: propColor = {0.25f, 0.38f, 0.15f}; break; // shrub: olive green
+        //                        case 4: propColor = {0.30f, 0.22f, 0.12f}; break; // dead_tree: dark brown
+        //                    }
+        //                }
+        //                bridgeSink_->spawnBox(
+        //                    p.position,
+        //                    static_cast<float>(p.scaleM * 0.5),
+        //                    static_cast<float>(p.scaleM),
+        //                    propColor
+        //                );
+        //            }
         // ---- the 3.1 sim wiring: stores, adapters, context, steps ----------
         wireSimulation(seed);
 
@@ -2135,6 +2401,11 @@ private:
     std::unique_ptr<ClockBridgeView> bridgeClock_;
     std::unique_ptr<EngineSceneSink> bridgeSink_;
     std::unique_ptr<bridge::SceneBridge> bridge_;
+    // Phase 5: the presentation fields (terrain, scatter, borders). Built once
+    // from the worldgen seed + climate grid; the bridge consumes them.
+    std::unique_ptr<bridge::TerrainField> terrainField_;
+    std::unique_ptr<bridge::ScatterField> scatterField_;
+    std::unique_ptr<bridge::BordersField> bordersField_;
 
     engine::EventSubscription fixedUpdateSubscription_;
     engine::EventSubscription frameSubscription_;

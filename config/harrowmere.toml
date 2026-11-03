@@ -123,7 +123,7 @@ max_fixed_update_steps = 5
 # staged override (--set trust.trustAllMods=true) works like any key.
 [trust]
 trustMods    = ["harrowmere_core", "harrowmere_ui", "example_species_mod"]
-trustModules = ["settings", "hot_reload"]
+trustModules = ["settings", "hot_reload", "screenshot"]
 # trustAllMods = false
 # trustAllModules = false
 
@@ -178,10 +178,11 @@ title = "Harrowmere"
 [lighting.pbr]
 shadow_steps = 12
 
-# Examples - uncomment to override:
-#
-# [renderer]
-# exposure = 1.4
+# Renderer: texture directory for PBR texture sets (the ambientCG layout).
+# The terrain mesh references textureSet="grass" which resolves to
+# assets/textures/grass/Color.png + Roughness.png + NormalGL.png.
+[renderer]
+texture_directory = "mods/harrowmere_core/assets/textures"
 
 [input.actions]
 # The keyboard belongs to the PLAYER (task 7.4P1): W/A/S/D walk the character

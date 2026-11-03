@@ -59,9 +59,10 @@
 #include <map>
 #include <vector>
 
-#include "core/types.hpp"    // Position, territoryId, regionId, characterId, speciesId, factionId (task 0.2)
-#include "core/enums.hpp"    // TerritoryType (task 1.1)
-#include "world/seasons.hpp" // WeatherState (task 3.8)
+#include "core/types.hpp"     // Position, territoryId, regionId, characterId, speciesId, factionId (task 0.2)
+#include "core/enums.hpp"     // TerritoryType (task 1.1)
+#include "world/seasons.hpp"  // WeatherState (task 3.8)
+#include "bridge/terrain.hpp" // TerrainField (task 5.1.2) — optional, null = Phase-1 flat ground
 
 namespace harrowmere
 {
@@ -276,6 +277,21 @@ public:
     )
     {}
 
+    // Phase 5 (task 5.1.2 integration): publish the terrain mesh as the
+    // scene's ground claim, replacing scene.toml's flat ground plane. The
+    // vertices are a flat (x, y, z) triple array in row-major order over a
+    // TERRAIN_GRID_STEPS x TERRAIN_GRID_STEPS grid (A-148). Default no-op -
+    // the Phase-1/Phase-2 fakes predate terrain and must keep compiling
+    // unmodified; the production adapter forwards to the scene capability's
+    // mesh publish (or logs until the engine grows the seam). Called ONCE
+    // per TerrainField (the mesh is static; a frame never re-publishes).
+    virtual Handle spawnTerrainMesh(
+        const std::vector<double> & /*vertices*/, std::uint32_t /*gridSteps*/
+    )
+    {
+        return NULL_HANDLE;
+    }
+
     // Update an existing object's position (used when territories move in
     // later phases; P1 calls this only if a territory's center changes
     // between frames, which it does not in P1 - declared for the seam).
@@ -388,6 +404,19 @@ public:
         SceneRegistrySink &sink,
         CharactersViewForBridge *characters
     );
+    // Phase 5 (task 5.1.2 integration): the terrain field is the bridge's
+    // ground claim. When present, the bridge publishes its meshGrid() once
+    // on the first frame via sink_.spawnTerrainMesh(); when null, the bridge
+    // falls back to scene.toml's flat ground plane (the Phase-1 contract).
+    // The TerrainField is NOT owned by the bridge (the plugin owns it for
+    // the run's lifetime); the bridge holds a raw pointer.
+    SceneBridge(
+        WorldViewForBridge &world,
+        ClockViewForBridge &clock,
+        SceneRegistrySink &sink,
+        CharactersViewForBridge *characters,
+        const TerrainField *terrain
+    );
     ~SceneBridge();
 
     SceneBridge(const SceneBridge &)            = delete;
@@ -414,6 +443,13 @@ public:
     {
         return sky_tint_updated_last_frame_;
     }
+    // Phase 5: true iff the terrain mesh has been published (spawnTerrainMesh
+    // called once on the first frame a TerrainField is present). Exposed for
+    // the integration test that asserts the publish fires exactly once.
+    bool terrainPublished() const noexcept
+    {
+        return terrain_published_;
+    }
 
     // ---- Phase-2 test hooks ------------------------------------------------
     // Live character/corpse objects (presence spheres + FAR markers, corpse
@@ -431,6 +467,9 @@ private:
     void processPendingCreations();       // chunked <= SCENE_CREATE_CHUNK_PER_FRAME
     void updateSunIfPhaseChanged();       // >= SUN_PHASE_UPDATE_THRESHOLD delta
     void updateSkyTintIfWeatherChanged(); // per A-117 table
+    // Phase 5: publish the terrain mesh once (the first frame a TerrainField
+    // is present). Idempotent — terrain_published_ guards re-entry.
+    void publishTerrainIfNeeded();
     // Phase 2: sync characters + corpses into the registry (create chunked,
     // move per frame, remove on tier/exit flips).
     void syncCharacters();
@@ -447,6 +486,7 @@ private:
     ClockViewForBridge &clock_;
     SceneRegistrySink &sink_;
     CharactersViewForBridge *characters_ = nullptr; // null = Phase-1 static run
+    const TerrainField *terrain_         = nullptr; // null = Phase-1 flat ground
 
     // R7: deterministic iteration via std::map (id-sorted).
     // One box per territory, one disc per safe zone. Kept across frames so
@@ -472,6 +512,7 @@ private:
 
     bool sun_updated_last_frame_      = false;
     bool sky_tint_updated_last_frame_ = false;
+    bool terrain_published_           = false; // Phase 5: spawnTerrainMesh called once
 
     // ---- Phase-2 state ------------------------------------------------------
     // The desired-shape record for one present character (rebuilt each frame
