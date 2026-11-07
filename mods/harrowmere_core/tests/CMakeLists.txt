@@ -36,6 +36,7 @@ set(HARROWMERE_TEST_SOURCES
     test_seasons.cpp             # task 3.8 - the season clock + weather machine
     test_player_control.cpp      # task 3.10 - intents, kinematic transform, AFK, action log
     test_scene_bridge.cpp        # task 7.2P1 - the static scene bridge
+    test_character_assembly.cpp  # rev 34 - the character-customisation assembly engine
     test_character_store.cpp     # task 2.0 - the doc-verbatim Character + CharacterStore
     test_status.cpp              # task 2.1 - derived statuses, consent, cooldowns
     test_species.cpp             # task 2.2 - species application

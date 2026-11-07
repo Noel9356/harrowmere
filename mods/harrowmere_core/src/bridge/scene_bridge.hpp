@@ -56,7 +56,9 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "core/types.hpp"     // Position, territoryId, regionId, characterId, speciesId, factionId (task 0.2)
@@ -64,10 +66,19 @@
 #include "world/seasons.hpp"  // WeatherState (task 3.8)
 #include "bridge/terrain.hpp" // TerrainField (task 5.1.2) — optional, null = Phase-1 flat ground
 
+namespace engine
+{
+// The rev-34 character-customisation module's published capability (the
+// pointer arrives from the plugin's acquire; the header stays out of this
+// one - the bridge only stores and forwards the pointer).
+class CharacterCustomisationCapability;
+}
+
 namespace harrowmere
 {
 namespace bridge
 {
+class CharacterLab; // the rev-34 lab (character_lab.hpp) - the bridge owns one
 
 // The LOD tier ordinals the character view carries (npc/state.hpp's unscoped
 // LodTier reads NEAR=0, MID=1, FAR=2; the bridge carries the plain integer
@@ -118,6 +129,86 @@ inline constexpr float SAFE_ZONE_DISC_HEIGHT  = 0.1f; // flat (7.2P1 spec)
 // Character presence: one sphere of radius 0.8 per present character,
 // resting on the ground plane (center y = radius).
 inline constexpr float CHARACTER_SPHERE_RADIUS = 0.8f; // task 7.2 spec
+
+// rev 28 - the organic near body: NEAR/MID characters within this radius of
+// the LOD anchor present as the procedural rounded humanoid (kind 3, four
+// objects: body + legs + head + hair meshes - the per-part randomized look);
+// the rest keep the kind-1 sphere + head LOD. The radius bounds the object
+// cost of the crowd (4-5 objects each) to the villagers a street-level
+// camera can actually tell apart, while the 300 m presentation radius
+// (A-118) stays sphere-priced.
+inline constexpr double CHARACTER_DETAIL_RADIUS_M = 42.0;
+
+// The organic mesh vocabulary's variant/scale names (registered in
+// registerPropMeshVocabulary from prop_mesh_data_cc0.h). Three body builds
+// (slim / regular / stout), two baked scales each (lg 1.80 m, sm 1.58 m) -
+// per-NPC height variation without scaling (mesh instances translate +
+// rotateY only, the renderer's contract).
+inline constexpr const char *kNpcBodyVariants[3][2] = {
+    {"npc_body_a_lg", "npc_body_a_sm"},
+    {"npc_body_b_lg", "npc_body_b_sm"},
+    {"npc_body_c_lg", "npc_body_c_sm"},
+};
+inline constexpr const char *kNpcLegsVariants[3][2] = {
+    {"npc_legs_a_lg", "npc_legs_a_sm"},
+    {"npc_legs_b_lg", "npc_legs_b_sm"},
+    {"npc_legs_c_lg", "npc_legs_c_sm"},
+};
+// rev 28 - the baked stride poses (the walk gait). The generator
+// (scripts/generate_organic_meshes.py) emits each variant+scale in THREE
+// poses: the neutral rest (the tables above) plus _wa/_wb, whole meshes
+// with the legs swung around the hip line (knees bent, feet re-planted) and
+// the arms counter-swinging around the shoulders (the renderer's mesh
+// instances translate + rotateY only, so the gait is a mesh swap, not a
+// skeletal animation). Index [pose][variant][scale]:
+// pose 0 = walk A (right leg forward), 1 = walk B (mirrored).
+inline constexpr const char *kNpcBodyWalkVariants[2][3][2] = {
+    {{"npc_body_a_lg_wa", "npc_body_a_sm_wa"},
+     {"npc_body_b_lg_wa", "npc_body_b_sm_wa"},
+     {"npc_body_c_lg_wa", "npc_body_c_sm_wa"}},
+    {{"npc_body_a_lg_wb", "npc_body_a_sm_wb"},
+     {"npc_body_b_lg_wb", "npc_body_b_sm_wb"},
+     {"npc_body_c_lg_wb", "npc_body_c_sm_wb"}},
+};
+inline constexpr const char *kNpcLegsWalkVariants[2][3][2] = {
+    {{"npc_legs_a_lg_wa", "npc_legs_a_sm_wa"},
+     {"npc_legs_b_lg_wa", "npc_legs_b_sm_wa"},
+     {"npc_legs_c_lg_wa", "npc_legs_c_sm_wa"}},
+    {{"npc_legs_a_lg_wb", "npc_legs_a_sm_wb"},
+     {"npc_legs_b_lg_wb", "npc_legs_b_sm_wb"},
+     {"npc_legs_c_lg_wb", "npc_legs_c_sm_wb"}},
+};
+// The gait phase mirrors the A-154 walk bob exactly (character_visuals.cpp:
+// phase = traveled / A-57 walk speed * WALK_BOB_HZ), so the stride poses
+// swap in step with the bob instead of against it. One stride pose per bob
+// half-cycle (0.909 m at the 4 m/s reference walk - a human step length).
+inline constexpr double NPC_GAIT_REFERENCE_SPEED_MPS = 4.0; // A-57 mirror
+// The pure bucket derivation (test-pinned): pose 0 (rest) when the
+// character is not in motion (the sim's moving intent OR this frame's
+// measured displacement - the render loop outruns the fixed tick, so a
+// displacement-only test would flicker), otherwise walk A/B alternating
+// on the bob phase. Exposed for TestBridge_GaitPoseBucket.
+std::uint8_t gaitPoseBucket(double traveledDistanceM, bool inMotion) noexcept;
+inline constexpr const char *kNpcHeadVariants[3][2] = {
+    {"npc_head_a_lg", "npc_head_a_sm"},
+    {"npc_head_b_lg", "npc_head_b_sm"},
+    {"npc_head_c_lg", "npc_head_c_sm"},
+};
+// rev 28 - the hair-cap meshes (a rounded shell over the ellipsoid head,
+// three styles: short crop / crop + back volume / full cap + long back).
+// They replace the analytic hair box, which read as a brick on the rounded
+// heads (the owner's "made out of blocks" verdict).
+inline constexpr const char *kNpcHairVariants[3][2] = {
+    {"npc_hair_a_lg", "npc_hair_a_sm"},
+    {"npc_hair_b_lg", "npc_hair_b_sm"},
+    {"npc_hair_c_lg", "npc_hair_c_sm"},
+};
+// The organic mesh sets' total heights (the generator bakes lg 1.80 m / sm
+// 1.58 m); the sphere-LOD cross-fade reads them.
+inline constexpr float kNpcMeshHeight[2] = {1.80f, 1.58f};
+// The organic model's texture sets: smooth plaster reads as woven cloth on
+// the torso, the skin set keeps the head's face tone.
+inline constexpr float NPC_MESH_UV_SCALE = 0.9f;
 
 // FAR-movement markers: a 0.6^3 box (half extents 0.3) at the mover's
 // position - transient, gray.
@@ -303,6 +394,161 @@ public:
 
     // Sky radiance tint (Linear-RGB).
     virtual void setSkyTint(const std::array<float, 3> &tint) = 0;
+
+    // The runtime environment state (the graphics-uplift round): the
+    // atmosphere module's per-frame sky gradient, fog, exposure and moon,
+    // pushed as one state the production adapter forwards into the scene
+    // registry's environment override (the renderer merges it over the
+    // static [scene] base). Default no-op - the Phase-1/2 fakes predate the
+    // atmosphere and must keep compiling unmodified.
+    virtual void setEnvironmentState(const struct SceneEnvironmentState & /*state*/) {}
+
+    // ---- the graphics-uplift spawn vocabulary -------------------------------
+    // Textured spawns: the prop compositions reference the mod's texture
+    // sets (the pastel palette's painted tiles) and carry an emissive
+    // strength (the lit windows). Defaults DELEGATE to the untextured
+    // spawns, so the Phase-1/2 fakes keep compiling AND keep counting the
+    // calls their assertions read (the production adapter overrides these).
+    virtual Handle spawnBoxTextured(
+        const Position &center, float halfWidth, float height, const std::array<float, 3> &tint,
+        const char * /*textureSet*/, float /*uvScale*/, float /*emissiveStrength*/
+    )
+    {
+        return spawnBox(center, halfWidth, height, tint);
+    }
+    // rev 30: the per-axis variant - walls, panels and slabs need rectangular
+    // plans (a 9.2 x 0.6 wall footprint is impossible with the square
+    // halfWidth above, which is how the first GI chamber rendered as four
+    // overlapping room-filling slabs). Defaults DELEGATE to the square
+    // spawnBoxTextured (the Phase-1/2 fakes keep compiling; the production
+    // adapter overrides this).
+    virtual Handle spawnBoxExtents(
+        const Position &center, float halfExtentX, float halfExtentY, float /*halfExtentZ*/,
+        const std::array<float, 3> &tint, const char *textureSet, float uvScale, float emissiveStrength
+    )
+    {
+        // The square fallback can only honor one plan axis; the default
+        // delegates (the fakes never render the chamber).
+        (void)halfExtentY;
+        return spawnBoxTextured(center, halfExtentX, halfExtentY, tint, textureSet, uvScale, emissiveStrength);
+    }
+    virtual Handle spawnSphereTextured(
+        const Position &center, float radius, const std::array<float, 3> &tint, const char * /*textureSet*/, float /*uvScale*/
+    )
+    {
+        return spawnSphere(center, radius, tint);
+    }
+
+    // The A-151 water plane: one flat mesh the size of the world patch at
+    // the sea level (mesh primitives are skipped by the analytic tracer, so
+    // the water never casts). Default no-op - the fakes predate water.
+    virtual Handle spawnWaterPlane(double /*extentM*/)
+    {
+        return NULL_HANDLE;
+    }
+
+    // ---- the prop-mesh vocabulary (rev 24, the proper-tree-models round) ----
+    //
+    // Trees as one box + one sphere read as lollipops (the owner's defect).
+    // Registered triangle meshes - a branching trunk, a layered canopy -
+    // rasterize their real vertices. The registry caps registered meshes
+    // (scene_capability.hpp maxMeshes), so the mod registers a FIXED
+    // vocabulary (trunk + canopy per species, one small variant each) and
+    // instances it per placement.
+    //
+    // registerPropMesh: vertices are interleaved position xyz + normal xyz
+    // (meshFloatsPerVertex), indices u32, authored in METERS with the base
+    // at y = 0 (mesh instances translate + rotateY only - the renderer's
+    // scale contract). Returns the mesh handle (0 = refused; the caller
+    // keeps the analytic fallback). Default no-op - the fakes predate the
+    // vocabulary and must keep compiling.
+    virtual Handle registerPropMesh(
+        const char * /*name*/, const std::vector<float> & /*vertices*/, const std::vector<std::uint32_t> & /*indices*/
+    )
+    {
+        return NULL_HANDLE;
+    }
+
+    // One mesh instance at `center` (the mesh's base rides on center.y),
+    // yawed rotationY radians, tinted (the A-189 tinted-photo mix pulls the
+    // texture set's hue toward the tint) and textured from `textureSet`.
+    // Default no-op (the degrade-if-absent contract).
+    virtual Handle spawnPropMeshInstance(
+        const char * /*meshName*/, const Position & /*center*/, float /*rotationY*/,
+        const std::array<float, 3> & /*tint*/, const char * /*textureSet*/, float /*uvScale*/
+    )
+    {
+        return NULL_HANDLE;
+    }
+
+    // rev 34: the same spawn with a per-axis instance scale (meters per
+    // authored meter) - the character-assembly parts instance one vocabulary
+    // at per-part proportions (the parameter bindings' axis scales). The
+    // default delegates to the unscaled spawn so every existing fake and
+    // adapter keeps compiling; the production adapter overrides it.
+    virtual Handle spawnPropMeshInstanceScaled(
+        const char *meshName, const Position &center, float rotationY,
+        const std::array<float, 3> &tint, const char *textureSet, float uvScale,
+        const std::array<float, 3> & /*scale*/
+    )
+    {
+        return spawnPropMeshInstance(meshName, center, rotationY, tint, textureSet, uvScale);
+    }
+
+    // rev 26: move an object WITH its yaw. The default delegates to
+    // setObjectPosition (yaw-drop) so the Phase-1/2 fakes keep compiling and
+    // keep counting the calls their assertions read; the production adapter
+    // forwards to SceneCapability::setObjectTransform, which carries the
+    // rotation. The blocky character bodies (mesh instances) ride this every
+    // frame: the old position-only path would have reset every villager's
+    // facing to 0 on the first move.
+    virtual void setObjectPose(Handle h, const Position &p, float /*rotationY*/)
+    {
+        setObjectPosition(h, p);
+    }
+
+    // ---- the village lamp lights (rev 24) ----------------------------------
+    // The lamp posts stood as emissive boxes only - the night ground around
+    // them stayed black (the spawn_night capture read as a black field with
+    // two glowing village slabs). These are the REAL point lights the pbr
+    // and relight passes evaluate (LightingCapability::addPointLight), one
+    // push per frame from the bridge. intensity 0 lamps are legal - the
+    // day frame pushes intensity 0 rather than nothing, so the adapter can
+    // keep its handle bookkeeping trivial.
+    struct LampLight
+    {
+        Position position;
+        std::array<float, 3> color{1.0f, 0.72f, 0.38f};
+        float intensity = 0.0f;
+        float radius    = 16.0f;
+    };
+    virtual void pushPointLights(
+        const std::vector<LampLight> & /*lights*/
+    )
+    {}
+};
+
+// The mod-side environment state (the bridge's vocabulary; the production
+// adapter maps it onto the engine's SceneEnvironmentOverride). All colors
+// Linear-RGB. sunIntensity <= 0 keeps the lighting provider's value; the
+// moon direction's length is ignored (normalized at push), intensity 0 = no
+// moon term.
+struct SceneEnvironmentState
+{
+    std::array<float, 3> skyZenith{0.0f, 0.0f, 0.0f};
+    std::array<float, 3> skyHorizon{0.0f, 0.0f, 0.0f};
+    std::array<float, 3> skyGround{0.0f, 0.0f, 0.0f};
+    float fogDensity                = 0.0f;
+    std::array<float, 3> fogTint{0.7f, 0.7f, 0.7f};
+    float exposure                  = -1.0f;
+    std::array<float, 3> moonDirection{0.0f, 0.0f, 0.0f};
+    float moonIntensity             = 0.0f;
+    std::array<float, 3> sunColor{1.0f, 0.97f, 0.90f};
+    float sunIntensity              = -1.0f;
+    // rev 26: the live sun direction (towards the scene) - the visible sun
+    // disk tracks the light the pbr module actually applies. Zero = keep
+    // the static [scene].sun direction.
+    std::array<float, 3> sunDirection{0.0f, 0.0f, 0.0f};
 };
 
 // World view: the territories to render plus the primary weather (drives
@@ -328,6 +574,10 @@ public:
     // the global sky tint. The kind is task 3.8's Weather enum (the ordinal
     // Region::weather.kind carries; weatherFromKind() decodes it).
     virtual world::Weather primaryWeather() const = 0;
+
+    // The season index (0..3, task 3.8's season state). Default 0 (spring) -
+    // the Phase-1/2 fakes predate seasons and must keep compiling unmodified.
+    virtual std::uint32_t seasonIndex() const { return 0; }
 };
 
 // Clock view: dayPhase01 in [0, 1) within the game day (0 = midnight,
@@ -427,6 +677,18 @@ public:
     // never mutates sim state.
     void onFrame();
 
+    // The graphics-uplift wiring: attach the scatter field (the settlement
+    // + vegetation placements) and the borders field (the water plane). Both
+    // are optional (null = the Phase-2 contract); neither is owned.
+    void attachScatterField(const class ScatterField *scatter) noexcept
+    {
+        scatter_ = scatter;
+    }
+    void attachBordersField(const class BordersField *borders) noexcept
+    {
+        borders_ = borders;
+    }
+
     // ---- test hooks (zero overhead in release; used by the pinned tests) --
     // Total live scene objects this bridge has created (boxes + discs).
     std::size_t spawnedObjectCount() const;
@@ -451,6 +713,42 @@ public:
         return terrain_published_;
     }
 
+    // ---- the GI validation chamber (rev 30) ---------------------------------
+    // The owner's "create a small room to test UE5's Lumen-like GI" - the
+    // Cornell-box move: ONE sealed room, ONE deterministic camera, and every
+    // GI phenomenon readable in a single frame (colored bleed, soft corner
+    // occlusion, emissive-through-GI, the point light's shadow gradient).
+    // The site is set by the plugin's staging (the gi_room capture scenario);
+    // a run without it never spawns the chamber (the world's object budget
+    // and every pinned capture stay untouched).
+    struct GiChamberSite
+    {
+        double x = 0.0;       // plan center, world X
+        double z = 0.0;       // plan center, world Z
+        double groundY = 0.0; // the terrain height at (x, z) - the floor's top
+    };
+    void setGiChamberSite(const GiChamberSite &site);
+    bool giChamberSpawned() const noexcept
+    {
+        return gi_chamber_spawned_;
+    }
+
+    // ---- the character-customisation lab (rev 34) ---------------------------
+    // The owner's architecture document's first implementation test: the
+    // hybrid assembly (humanoid torso + pelvis, canine head, digitigrade
+    // legs, humanoid arms, avian wings, tail) beside its VARIANT (the test
+    // operations as data: avian head, wings removed, wider torso, longer
+    // legs, a second tail). Same staging pattern as the chamber: the
+    // capability + the site arrive from the plugin; a run without them
+    // never spawns the lab.
+    void setCharacterLibrary(engine::CharacterCustomisationCapability *capability,
+        const std::filesystem::path &dataDirectory);
+    void setCharacterLabSite(const GiChamberSite &site);
+    bool characterLabSpawned() const noexcept
+    {
+        return character_lab_spawned_;
+    }
+
     // ---- Phase-2 test hooks ------------------------------------------------
     // Live character/corpse objects (presence spheres + FAR markers, corpse
     // boxes; the ring shells are part of the character object count).
@@ -465,16 +763,23 @@ public:
 private:
     void buildPendingQueueIfNeeded();
     void processPendingCreations();       // chunked <= SCENE_CREATE_CHUNK_PER_FRAME
-    void updateSunIfPhaseChanged();       // >= SUN_PHASE_UPDATE_THRESHOLD delta
-    void updateSkyTintIfWeatherChanged(); // per A-117 table
     // Phase 5: publish the terrain mesh once (the first frame a TerrainField
     // is present). Idempotent — terrain_published_ guards re-entry.
     void publishTerrainIfNeeded();
+    // The graphics-uplift round: atmosphere, water, scatter.
+    void updateAtmosphere();          // sampleAtmosphere -> sun/sky/fog/exposure/moon push
+    void publishWaterIfNeeded();      // the A-151 sea-level plane, once
+    void publishScatterWindow();      // the A-183 window around the anchor
+    // rev 24: the registered prop-mesh vocabulary (tree trunks/canopies, the
+    // dead tree), once per run before the first scatter spawn.
+    void registerPropMeshVocabulary();
+    void spawnPropComposition(const class ScatterPlacement &placement); // one prop's primitive composition
     // Phase 2: sync characters + corpses into the registry (create chunked,
     // move per frame, remove on tier/exit flips).
     void syncCharacters();
     void syncCorpses();
     void syncJailCages();
+    void syncGiChamber(); // rev 30: the GI validation chamber, once, when staged
     void drainCharacterCreations(); // A-119 chunk over the pending char/corpse queues
 
     float territoryMarkerHeight(TerritoryType t) const;
@@ -487,6 +792,17 @@ private:
     SceneRegistrySink &sink_;
     CharactersViewForBridge *characters_ = nullptr; // null = Phase-1 static run
     const TerrainField *terrain_         = nullptr; // null = Phase-1 flat ground
+    const class ScatterField *scatter_   = nullptr; // null = no scatter (Phase-2 contract)
+    const class BordersField *borders_   = nullptr; // null = no water/borders
+
+    // ---- atmosphere push state --------------------------------------------
+    // The last pushed environment state: re-pushed only when it changes
+    // (the sink's sequence bumps only on change, but skipping identical
+    // pushes here keeps the adapter work at zero on a still frame).
+    SceneEnvironmentState last_environment_;
+    bool environment_pushed_ = false;
+    world::Weather last_environment_weather_ = world::Weather::COUNT; // the env state's weather key
+    float last_window_emissive_ = -1.0f; // the window-emissive state (day 0 / night 1)
 
     // R7: deterministic iteration via std::map (id-sorted).
     // One box per territory, one disc per safe zone. Kept across frames so
@@ -523,16 +839,41 @@ private:
         Position position{};
         speciesId species = 0;
         factionId faction = 0;
+        bool moving       = false; // the view's movement flag (A-154's bob gate)
     };
 
     // Live character objects: id -> {shape kind, body handle, ring handle}.
     // The ring shell exists only for factioned presence spheres (handle 0 =
-    // none). FAR markers carry no ring.
+    // none). FAR markers carry no ring. bodyRadius carries the per-character
+    // girth jitter (character_look.hpp) the move loop re-applies every frame
+    // (the spawn's radius is presentation state, not a sim read).
+    //
+    // rev 26 - the blocky near body (kind 3): within
+    // CHARACTER_DETAIL_RADIUS_M of the LOD anchor a NEAR/MID character
+    // presents as the converted Kenney CC0 blocky model (npc_body_* /
+    // npc_legs_* / npc_head_* mesh instances, one hair box above the head)
+    // with the per-part randomized look (tunic / pants / skin / hair dyes).
+    // Beyond the detail radius the kind-1 sphere+head LOD returns (the
+    // object budget stays bounded as the crowd grows). kind transitions
+    // recreate the object through the existing diff path.
     struct CharacterObject
     {
         int kind                       = 1;
         SceneRegistrySink::Handle body = SceneRegistrySink::NULL_HANDLE;
         SceneRegistrySink::Handle ring = SceneRegistrySink::NULL_HANDLE;
+        // rev 26: the blocky body's extra parts (kind 3 only).
+        SceneRegistrySink::Handle legs = SceneRegistrySink::NULL_HANDLE;
+        SceneRegistrySink::Handle head = SceneRegistrySink::NULL_HANDLE;
+        SceneRegistrySink::Handle hair = SceneRegistrySink::NULL_HANDLE;
+        std::uint32_t bodyVariant      = 0;   // the npc mesh variant pick
+        float smallScale               = 1.0f; // 1.0 lg / 0.88 sm mesh set
+        float bodyRadius               = CHARACTER_SPHERE_RADIUS;
+        float heightJitter             = 1.0f;
+        // rev 27: the live gait pose (0 rest, 1 walk A, 2 walk B). The move
+        // loop swaps the body+legs mesh instances when the bucket changes
+        // (spawn-then-remove, so a swap never drops the villager for a
+        // frame); presentation-only state derived from traveled distance.
+        std::uint8_t gaitPose          = 0;
     };
     std::map<characterId, CharacterObject> character_objects_;
 
@@ -556,6 +897,52 @@ private:
     std::map<characterId, CharactersViewForBridge::CorpseDesc> desired_corpses_; // rebuilt per frame
     std::vector<territoryId> pending_jail_cages_;                                // territories still needing a cage
     bool jail_cages_queued_ = false;
+
+    // The GI validation chamber (rev 30): the staged site + the once-guard.
+    GiChamberSite gi_chamber_site_{};
+    bool gi_chamber_spawned_ = false;
+
+    // The character-customisation lab (rev 34): the same pattern one rev
+    // later. The lab is defined in character_lab.hpp (the loader + the two
+    // proof assemblies); the bridge owns its lifetime and per-frame update.
+    std::unique_ptr<CharacterLab> character_lab_;
+    bool character_lab_spawned_ = false;
+
+    // ---- the graphics-uplift state ------------------------------------------
+    // Water: one plane handle (spawned once; the sea level never moves).
+    SceneRegistrySink::Handle water_handle_ = SceneRegistrySink::NULL_HANDLE;
+    bool water_published_                   = false;
+    // rev 24: the prop-mesh vocabulary registration guard (registerPropMesh
+    // is idempotent per name, the flag keeps the per-frame cost at one bool).
+    bool prop_meshes_registered_            = false;
+    // rev 24: the lamp point-light push (the scatter window's lamp posts as
+    // real night lights, LightingCapability via the adapter's pool).
+    void syncLampLights();
+
+    // Scatter: the live window's placement index -> the handles its
+    // composition spawned (bodies first). The window republishes as the
+    // anchor moves: placements outside the despawn radius lose their
+    // handles, placements inside the publish radius gain them (chunked at
+    // A-119's budget shared with the rest of the bridge's creations).
+    struct ScatterObjects
+    {
+        std::vector<SceneRegistrySink::Handle> parts;
+    };
+    std::map<std::size_t, ScatterObjects> scatter_objects_;
+    std::vector<std::size_t> scatter_pending_;               // in-window indices awaiting creation
+    std::uint64_t scatter_anchor_cell_ = ~std::uint64_t{0};  // the window's last anchor cell
+    std::size_t placement_index_       = 0;                  // the placement spawnPropComposition is filling
+
+    // Character bodies carry a head sphere (A-188) - the same map as above
+    // gains the head handle; tracked separately so the despawn path removes
+    // both.
+    std::map<characterId, SceneRegistrySink::Handle> character_heads_;
+
+    // Traveled-distance accumulator per character (A-154's bob phase; the
+    // bridge tracks the distance each character moved since last seen -
+    // presentation-only state, never sim state).
+    std::map<characterId, double> character_traveled_;
+    std::map<characterId, Position> character_last_position_;
 };
 
 } // namespace bridge

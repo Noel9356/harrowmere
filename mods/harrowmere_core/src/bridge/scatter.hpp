@@ -136,6 +136,16 @@ struct ScatterPlacement
     bool isSettlement       = false; // true iff this is a settlement building (vs scatter)
 };
 
+// One settlement's seed center (the graphics-uplift round): the bridge feeds
+// the world's village/city territory centers before the first placements()
+// call, and the field lays each center's A-150 footprint cluster around it.
+struct ScatterSettlementCenter
+{
+    Position position{};          // the territory's region center (world metres)
+    const char *tierKey = "VILLAGE"; // the settlementFootprints key ("VILLAGE"/"CITY")
+    std::uint64_t seedMix = 0;    // the territory id — the cluster layout's hash domain
+};
+
 // ---- the field ------------------------------------------------------------
 
 // The scatter field for one world. Constructed from (seed, climate grid,
@@ -177,6 +187,22 @@ public:
         return placements_.size();
     }
 
+    // The loaded tables (the bridge's prop-composition publisher reads the
+    // prop keys by index; the placement list carries indices only).
+    const ScatterTables &tables() const noexcept
+    {
+        return *tables_;
+    }
+
+    // The settlement centers (the graphics-uplift round): MUST precede the
+    // first placements() call (buildPlacements runs once and reads them).
+    // Empty by default, so the synthetic-field tests keep their exact
+    // vegetation-only lists.
+    void setSettlementCenters(std::vector<ScatterSettlementCenter> centers) const
+    {
+        settlementCenters_ = std::move(centers);
+    }
+
 private:
     void buildPlacements() const;
 
@@ -185,6 +211,7 @@ private:
     const TerrainField *terrain_ = nullptr;
     const ScatterTables *tables_ = nullptr;
     mutable std::vector<ScatterPlacement> placements_;
+    mutable std::vector<ScatterSettlementCenter> settlementCenters_;
     mutable bool built_ = false;
 };
 

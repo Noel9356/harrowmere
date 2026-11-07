@@ -1,0 +1,21 @@
+# Shipped defaults of the character_customisation module (the data-driven
+# modular character service: parts library, compatibility rules, validated
+# attachment-tree assemblies, parameter bindings).
+#
+# The module's own configuration layer: the kernel merges it as the lowest
+# defaults layer, so config/engine.toml (and staged overrides) win over
+# anything written here. Defaults FILL: a key a higher layer already
+# provided is never touched. Documented in README.md next to this file.
+
+[character.customisation]
+# The per-assembly part ceiling (the doc's mandatory validation: the part
+# count check). A recipe above the ceiling is refused with a precise
+# message - the ceiling is also a scene-object-budget guard, since every
+# resolved part becomes one registry object at the call site.
+max_parts_per_assembly = 48
+
+# strict = an out-of-range parameter REJECTS the assembly (the doc's
+# "values satisfy declared ranges and constraints"); relaxed clamps the
+# value into the registry's range and builds anyway (an A/B path for
+# content debugging).
+strict_parameters = true

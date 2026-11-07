@@ -44,6 +44,12 @@ add_library(harrowmere_core_objects OBJECT
     src/world/seasons.cpp
     # task 7.2P1 - the static scene bridge (frame-coupled presentation)
     src/bridge/scene_bridge.cpp
+    src/bridge/character_lab.cpp
+    # rev 24 - the per-character randomized presentation look (the tunic
+    # dyes, jittered tones and crowd silhouettes)
+    src/bridge/character_look.cpp
+    # rev 24 - the procedural prop-mesh vocabulary (the proper tree models)
+    src/bridge/prop_meshes.cpp
     # tasks 7.3/7.4 - the published capability surface's step-9 command
     # application: the Phase-2 command set (card 7.3's pinned list) routes
     # to its owner systems; the 3.10 intents forward to applyIntents
@@ -212,6 +218,7 @@ target_link_libraries(harrowmere_core_objects PUBLIC
     engine_capability_scene
     engine_capability_input
     engine_capability_pbr # the lighting family's published header (optional probe, 7.2P1 sun seam)
+    engine_capability_character_customisation # rev 34: the parts-library capability the mod acquires
 )
 
 # nlohmann_json v3.11.3 (vendored at third_party/nlohmann_json, task 0.4):

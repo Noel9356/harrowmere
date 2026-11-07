@@ -126,8 +126,8 @@ TEST_CASE(
 // TestScatter_DensityFollowsClimateTable
 //
 // The per-climate density from scatter_tables.json drives the placement
-// count: FOREST (pine 5/ha + shrub 9/ha = 14/ha) has more props than
-// MOUNTAIN (boulder 6 + pine 2 + dead_tree 1 = 9/ha) per region. The test
+// count: FOREST (pine 8/ha + shrub 12/ha = 20/ha) has more props than
+// MOUNTAIN (boulder 8 + pine 4 + dead_tree 2 = 14/ha) per region. The test
 // counts placements per climate and asserts the table's ordering holds.
 // ---------------------------------------------------------------------------
 TEST_CASE(
@@ -172,12 +172,12 @@ TEST_CASE(
         }
     }
 
-    // The table's total density per climate (per hectare):
-    //   FOREST:   pine 5 + shrub 9 + boulder 1 = 15/ha
-    //   MOUNTAIN: boulder 6 + pine 2 + dead_tree 1 = 9/ha
-    //   SWAMP:    dead_tree 4 + shrub 6 = 10/ha
-    //   TEMPERATE: shrub 7 + pine 2 + boulder 1 = 10/ha
-    //   COASTAL:  shrub 3 + boulder 2 = 5/ha
+    // The table's total density per climate (per hectare, rev 23 tables):
+    //   FOREST:   pine 8 + shrub 12 + boulder 2 = 22/ha
+    //   MOUNTAIN: boulder 8 + pine 4 + dead_tree 2 = 14/ha
+    //   SWAMP:    dead_tree 6 + shrub 8 = 14/ha
+    //   TEMPERATE: shrub 9 + pine 4 + boulder 2 = 15/ha
+    //   COASTAL:  shrub 5 + boulder 4 = 9/ha
     // The number of regions per climate depends on the synthetic grid; the
     // test asserts the DENSITY ORDERING (FOREST > MOUNTAIN per region, not
     // absolute count).
@@ -217,7 +217,7 @@ TEST_CASE(
         return static_cast<double>(pc == perClimate.end() ? 0 : pc->second) / static_cast<double>(rc->second);
     };
 
-    // FOREST has higher per-region density than COASTAL (15/ha vs 5/ha in
+    // FOREST has higher per-region density than COASTAL (22/ha vs 9/ha in
     // the table). Some placements are rejected (water/steep slope), so the
     // ordering holds but the exact ratio may differ.
     if (regionsPerClimate.count("FOREST") && regionsPerClimate.count("COASTAL"))

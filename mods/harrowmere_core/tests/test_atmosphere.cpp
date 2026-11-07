@@ -156,8 +156,9 @@ TEST_CASE(
     const auto stormFog = fogFor(AtmosphereWeather::STORM);
     const auto fogFog   = fogFor(AtmosphereWeather::FOG);
 
-    // CLEAR has the lowest density (0).
-    CHECK(clearFog.density == doctest::Approx(0.0f).epsilon(1e-6));
+    // CLEAR carries the lightest haze, not zero (rev 22: the aerial
+    // perspective that turns the hard horizon seam into depth).
+    CHECK(clearFog.density > 0.0f);
     // RAIN > CLEAR.
     CHECK(rainFog.density > clearFog.density);
     // STORM > RAIN (storm is heavier).
@@ -186,8 +187,9 @@ TEST_CASE(
 // TestAtmo_NightWithinExposureFloorCeiling
 //
 // Night is dark but playable: the exposure target at night is at the
-// EXPOSURE_NIGHT_FLOOR (0.08), not 0. Day is at the EXPOSURE_DAY_CEILING
-// (1.0). Every phase's exposure is in [floor, ceiling].
+// EXPOSURE_NIGHT_FLOOR (0.35 since rev 21), not 0. Day is at the
+// EXPOSURE_DAY_CEILING (1.15 since rev 22). Every phase's exposure is in
+// [floor, ceiling].
 // ---------------------------------------------------------------------------
 TEST_CASE(
     "TestAtmo_NightWithinExposureFloorCeiling"

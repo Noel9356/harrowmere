@@ -186,6 +186,16 @@ float sceneSDFOwned(vec3 point, uint primitiveCount, out uint owner)
     for (uint index = 0u; index < primitiveCount; ++index)
     {
         const GpuPrimitive primitive = primitives[index];
+        // Mesh-typed primitives carry NO analytic proxy in this field: their
+        // tracing size is the registered mesh's bounding-box half extents,
+        // and reading it as a box/sphere made the 16-km terrain mesh an
+        // 8-km occluder (a proxy sphere that shadowed half the world and
+        // choked the GI field - the "murky" frames). Meshes shade through
+        // the raster path only; the analytic field stays box/sphere-only.
+        if (primitive.positionType.w > 1.5)
+        {
+            continue;
+        }
         const vec3 local = worldToLocalY(point - primitive.positionType.xyz, primitive.metallicEmissiveStrength.zw);
         float distance;
         if (primitive.positionType.w < 0.5)

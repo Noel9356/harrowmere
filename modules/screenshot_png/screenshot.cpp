@@ -6,6 +6,7 @@
 #include <sol/sol.hpp>
 
 #include <algorithm>
+#include <thread>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -235,14 +236,28 @@ void ScreenshotModule::start()
 
 void ScreenshotModule::stop()
 {
-    // The workers stop first: a capture still queued at shutdown is dropped
-    // (the run is over; nothing reads it) - logged, not silent, when one was
-    // in flight.
-    if (encodeTasksInFlight > 0)
+    // Rev 25 fix (the dropped-capture round): DRAIN in-flight encodes before
+    // stopping the workers. The old body dropped every capture still queued
+    // at shutdown - the capture suite lost frames whenever lavapipe's slow
+    // frame path starved the encode workers inside the quit window (the
+    // frontier scenario dropped three times running; one four-scenario chunk
+    // lost every frame). The in-flight counter decrements on the frame
+    // thread inside drainCompletedTasks, and stop() runs on that same
+    // thread, so this bounded drain cannot race the workers: they stay
+    // alive until encoder.stop() below.
     {
-        logger->logMessage(
-            LogLevel::Warning, "screenshot module: a capture was still encoding at shutdown; it was dropped"
-        );
+        const auto drainDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (encodeTasksInFlight > 0 && std::chrono::steady_clock::now() < drainDeadline)
+        {
+            encoder.drainCompletedTasks();
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        if (encodeTasksInFlight > 0)
+        {
+            logger->logMessage(
+                LogLevel::Warning, "screenshot module: a capture was still encoding at shutdown; it was dropped"
+            );
+        }
     }
     encoder.stop();
     keyPressedSubscription.release();

@@ -144,9 +144,14 @@ struct SkyAnchorRow
 };
 
 inline constexpr std::array<SkyAnchorRow, 4> SKY_ANCHORS{{
-    {"dawn", {0.55f, 0.40f, 0.35f}},  // A-155 dawn (warm horizon)
-    {"noon", {0.45f, 0.55f, 0.75f}},  // A-155 noon (blue sky)
-    {"dusk", {0.60f, 0.35f, 0.30f}},  // A-155 dusk (sunset reds)
+    {"dawn", {0.45f, 0.50f, 0.70f}},  // A-155 dawn (rev 25: MORNING BLUE - the old
+                                      // sunset-orange anchor put a mud-mauve wash
+                                      // over every 8:00-10:00 capture; the amber sun
+                                      // key and the horizon glow carry the warmth)
+    {"noon", {0.32f, 0.50f, 0.85f}},  // A-155 noon (rev 25: (0.45,0.55,0.75) read pale-grey behind
+                                      // the cloud deck and the fog band - the deeper, bluer zenith
+                                      // gives the day sky the contrast the "boring" verdict named)
+    {"dusk", {0.64f, 0.31f, 0.22f}},  // A-155 dusk (sunset reds; rev 25: richer)
     {"night", {0.04f, 0.05f, 0.08f}}, // A-155 night (deep dark blue)
 }};
 
@@ -183,8 +188,8 @@ inline constexpr std::array<SeasonTintRow, 4> SEASON_TINTS{{
 // "realistic" black night fails the capture checklist by design (the card's
 // pitfall). The ceiling clips day-bright scenes so the tone target stays
 // in [floor, ceiling].
-inline constexpr double EXPOSURE_NIGHT_FLOOR = 0.08; // A-156
-inline constexpr double EXPOSURE_DAY_CEILING = 1.0;  // A-156
+inline constexpr double EXPOSURE_NIGHT_FLOOR = 0.35; // A-156 (rev 21: 0.08 rendered black under the moon-only rig)
+inline constexpr double EXPOSURE_DAY_CEILING = 1.15; // A-156 (rev 22: 1.0 left the day reading dusk-dark in the uplift captures)
 
 // ---- A-157: bloom strength (task 5.1.4) ------------------------------------
 //
@@ -258,5 +263,92 @@ inline constexpr double TERRAIN_NEAR_RADIUS_M = 1500.0; // A-160
 // A-150, A-151, A-152, A-158, A-159 land here with tasks 5.2.1 and 5.2.2.
 // A-160 is cited by 5.3.1 and 7.2.1 (not yet landed). The remaining
 // A-row in this block is A-160, which lands when 5.3.1 lands.
+
+// ---- A-182: terrain texture tiling (the graphics-uplift round) -------------
+//
+// "one texture tile covers 4.0 world metres" — the terrain mesh is world-
+// planar mapped (uv = world XZ / A-182), so the shipped grass set tiles
+// across the whole 16 km patch instead of collapsing to one texel through
+// the bbox parameterization the mesh path inherited.
+inline constexpr float TERRAIN_UV_TILE_M = 4.0f; // A-182
+
+// ---- A-183: scatter window (the graphics-uplift round) ---------------------
+//
+// The per-frame scatter instance window around the LOD anchor: the bridge
+// publishes placements within this radius (plus a despawn hysteresis band)
+// through the scene sink, chunked at A-119's 32/frame. 320 instances covers
+// a full village footprint (A-150's 8-60 buildings as multi-part primitive
+// compositions) plus the surrounding vegetation ring; the 12,000 A-152
+// ceiling stays the world-wide budget the view caps against.
+inline constexpr std::uint32_t SCATTER_WINDOW_INSTANCES = 300;    // A-183 (rev 23: 220 -> 300, the settlement yards)
+inline constexpr double SCATTER_WINDOW_RADIUS_M         = 420.0;  // A-183 (rev 23: 380 -> 420, the publish radius)
+inline constexpr double SCATTER_DESPAWN_RADIUS_M        = 500.0;  // A-183 (rev 23: 460 -> 500, hysteresis)
+
+// ---- A-186: sun/moon light anchors (the graphics-uplift round) -------------
+//
+// The day/night light rig: the sun's peak irradiance multiplier (the
+// scene.toml intensity is the noon value), the moon's irradiance and
+// travel direction at night, and the elevation epsilon under which the sun
+// hands over to the moon (the seam both lights agree on, so dawn/dusk
+// frames never pop between the two).
+inline constexpr float SUN_IRRADIANCE_SCALE    = 6.5f;  // A-186 (rev 21: 5.0 read dark under the tinted-photo mix)
+// A-186 (rev 29: 3.2 pumped the night into daylight). The moon key rides the
+// sun channel THROUGH the A-156 night exposure floor (0.08 -> a 12.5x gain),
+// and 3.2 is 49% of the noon sun key: the 2:00 capture rendered the meadow at
+// ~0.41 sRGB region luma under a near-black sky - a floodlit pitch, not a
+// moonlit one. 1.2 (18% of noon) with the composite's moon-floor scale eased
+// to match lands the moonlit ground at ~0.22 sRGB: structured dark, lamps
+// and windows read BRIGHTER against it (the rev-24 intent), the moon disk
+// keeps its glow.
+inline constexpr float MOON_IRRADIANCE         = 1.2f;
+inline constexpr std::array<float, 3> MOON_DIRECTION{-0.42f, -0.78f, 0.46f}; // A-186 (unit, towards scene)
+inline constexpr float SUN_ELEVATION_EPSILON   = 1e-4f; // A-186 (the hand-over seam)
+
+// ---- A-187: the Harrowmere palette (the theme row) -------------------------
+//
+// The game's theme, pinned so every surface sings from one songbook:
+// Harrowmere reads as a COZY-MEDIEVAL pastel low-poly world — warm cream
+// plaster, terracotta and slate roofs, soft green meadows, gentle water.
+// Every tint the bridge pushes draws from this table (Linear-RGB); no
+// ad-hoc colors elsewhere. Palettes swap values, never keys (the A-158 rule).
+struct PaletteRow
+{
+    const char *name;
+    std::array<float, 3> color; // Linear-RGB
+};
+
+inline constexpr std::array<PaletteRow, 14> HARROWMERE_PALETTE{{
+    {"grass", {0.270f, 0.520f, 0.150f}},     // A-187 (rev 25: greener - the CC0 photo's
+                                             // yellow-olive plus the old tint read as savanna)
+    {"dirt", {0.486f, 0.361f, 0.216f}},      // A-187 path dirt
+    {"plaster", {0.870f, 0.815f, 0.686f}},   // A-187 cream wall plaster
+    {"timber", {0.278f, 0.184f, 0.102f}},    // A-187 dark timber frame
+    {"roof_terra", {0.443f, 0.129f, 0.055f}},// A-187 terracotta roof tile
+    {"roof_slate", {0.129f, 0.153f, 0.196f}},// A-187 slate roof tile
+    {"stone", {0.361f, 0.345f, 0.318f}},     // A-187 wall stone / well
+    {"wood", {0.310f, 0.204f, 0.114f}},      // A-187 fence/cart wood
+    {"water", {0.055f, 0.161f, 0.310f}},     // A-187 lake water
+    {"window_lit", {1.000f, 0.769f, 0.357f}},// A-187 warm window light (emissive)
+    {"skin", {0.824f, 0.573f, 0.400f}},      // A-187 character head tone
+    {"night_ambient", {0.008f, 0.014f, 0.031f}}, // A-187 deep night blue
+    // rev 24 rows (the village-yard round; appended through the same
+    // palette door — palettes swap values, never keys).
+    {"hay", {0.780f, 0.640f, 0.300f}},       // rev 24 stored-fodder ochre
+    {"ember", {1.000f, 0.480f, 0.140f}},     // rev 24 campfire ember core
+}};
+
+// Look up one palette row by name; returns the first row on a miss (a
+// deterministic, never-crashing fallback the caller can log once).
+std::array<float, 3> paletteColor(const char *name) noexcept;
+
+// ---- A-188: character body composition (the graphics-uplift round) --------
+//
+// The presence silhouette leaves the bare sphere: a body sphere (species
+// tint, A-153 girth scale) carries a head sphere (A-187 skin tone) offset
+// FORWARD along the character's facing (A-153 height scale sets the head's
+// rest height; A-154's bob lifts both). The offsets are fractions of the
+// body radius so every species scale keeps the same proportions.
+inline constexpr float CHARACTER_HEAD_OFFSET_LR = 0.55f; // A-188 (x body radius, forward)
+inline constexpr float CHARACTER_HEAD_RADIUS    = 0.42f; // A-188 (x body radius)
 
 } // namespace harrowmere

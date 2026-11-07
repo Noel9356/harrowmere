@@ -98,11 +98,17 @@ inline constexpr const char *vulkanApplicationName = "engine";
 // CMakeLists project() VERSION - one product version.
 inline constexpr std::uint32_t vulkanInstanceVersion = VK_MAKE_VERSION(0, 1, 0);
 // Composite descriptor layout: bindings 0..6 are the image inputs, 7/8 the
-// environment and camera uniforms. The composite shader declares exactly this
-// layout (scene_composite.frag).
+// environment and camera uniforms, and 9..11 (rev 31, the layered depth
+// buffer) the transparency layer the composite blends over layer 0: the
+// transparent surface's albedo+roughness, its world normal + authored alpha,
+// and its NDC depth. The composite shader declares exactly this layout
+// (scene_composite.frag).
 inline constexpr std::uint32_t compositeImageBindingCount  = 7;
 inline constexpr std::uint32_t compositeEnvironmentBinding = 7;
 inline constexpr std::uint32_t compositeCameraBinding      = 8;
+inline constexpr std::uint32_t compositeTransAlbedoBinding = 9; // rgb albedo, a roughness
+inline constexpr std::uint32_t compositeTransNormalBinding = 10; // rgb world normal, a authored alpha
+inline constexpr std::uint32_t compositeTransDepthBinding  = 11; // NDC depth of the nearest transparent surface
 // Scene descriptor layout (scene.vert / scene.frag): bindings 2/3 are
 // reserved for the shared lighting set the techniques bind; the scene pass
 // only uses camera, primitives and the two texture arrays.
@@ -138,6 +144,12 @@ struct ObjectPush
     // texels. Unused (zeros) for analytic primitives.
     std::array<float, 4> meshBox;
 };
+
+// Rev 31: the transparency pass shares the object push block; the unused
+// metallicEmissiveStrength.z lane carries the object's authored OPACITY
+// multiplier (1.0 for the water plane - the per-pixel absorption comes from
+// the depth delta in the composite). The opaque scene.frag ignores the lane.
+inline constexpr std::uint32_t objectPushOpacityLane = 2;
 
 struct CompositePush
 {
@@ -185,6 +197,11 @@ struct EnvironmentData
     std::array<float, 4> skyGround;        // rgb ground radiance, w sun disk enabled
     std::array<float, 4> sunDiskDirection; // xyz direction towards the scene, w cos(inner angle)
     std::array<float, 4> sunDiskRadiance;  // rgb disk radiance, w cos(outer angle)
+    // The runtime atmosphere slice (the mod-driven override): exp2 distance
+    // fog over world metres (x density, yzw tint) and the moon (xyz unit
+    // direction towards the scene, w intensity; 0 = no moon term).
+    std::array<float, 4> fogDensityTint;   // x density [0,1], yzw linear fog tint
+    std::array<float, 4> moonDirectionIntensity; // xyz direction, w intensity
 };
 
 // std430 mirror of materials_common.glsl's GpuMaterial. One entry per scene
@@ -219,7 +236,9 @@ struct RendererState
     // build" - a scene that still names texture sets then fails precisely.
     std::filesystem::path textureDirectory;
     std::filesystem::path resolvedTextureDirectory;
-    float exposure          = 1.0f;
+    float configuredExposure = 1.0f; // the [renderer].exposure value (construct + live reload)
+    float exposure           = 1.0f; // the RUNTIME-effective value (the frame path resolves it
+                                     // against the mod's environment override every frame)
     std::string tonemapMode = "aces";
     // The tonemap string resolved once per change instead of two std::string
     // comparisons per frame in the composite and bloom passes. The cache
@@ -228,6 +247,18 @@ struct RendererState
     // next frame with no invalidation hook.
     std::string tonemapModeResolvedFrom;
     std::int32_t tonemapModeValue = tonemapAces;
+
+    // The runtime environment override (the mod-driven atmosphere state).
+    // pullEnvironmentOverride() re-reads the scene capability's override
+    // every frame; an integer sequence compare (the registry bumps it only
+    // on change) decides whether the environment buffer rebuilds and the
+    // effective exposure re-resolves - a mod pushing the same state every
+    // frame costs one capability call plus one integer compare.
+    SceneEnvironmentOverride environmentOverride;
+    std::uint32_t environmentSequenceSeen = 0;
+    bool environmentOverrideLive          = false; // any override pushed at all
+
+    void pullEnvironmentOverride();
     std::int32_t resolvedTonemapMode();
     // Bloom (post-processing) configuration. Off by default: it is a look
     // choice, and the honest default is the scene as authored.
@@ -294,6 +325,15 @@ struct RendererState
     FrameImage indirectRadianceImage; // RGBA16F: diffuse GI irradiance (only with a technique writing it)
     FrameImage indirectSpecularImage; // RGBA16F: reflection radiance (only with a technique writing it)
     FrameImage depthImage;            // D32_SFLOAT
+    // Rev 31 (the layered depth buffer): the transparency layer. transDepth
+    // stores the NEAREST transparent surface's NDC depth (R32F), and the
+    // pair of material targets carry that surface's albedo+roughness and
+    // world normal + authored alpha. The composite blends the layer over the
+    // opaque result with a per-pixel depth-delta opacity (Beer-Lambert on
+    // the view-ray path length through the medium).
+    FrameImage transAlbedoImage;      // RGBA8_UNORM: rgb albedo, a roughness
+    FrameImage transNormalImage;      // RGBA16F: rgb world normal, a authored alpha
+    FrameImage transDepthImage;       // R32_SFLOAT: NDC depth of the nearest transparent surface
     FrameImage dummyImage;            // 1x1 RGBA16F bound where a lighting target is absent
     // Bloom chain (post-processing; [renderer] bloom): the HDR intermediate
     // the composite writes pre-tonemap, and the half-resolution bright-pass
@@ -330,6 +370,13 @@ struct RendererState
 
     std::unique_ptr<vk::raii::PipelineLayout> scenePipelineLayout;
     std::unique_ptr<vk::raii::Pipeline> scenePipeline;
+    // Rev 31 (the layered depth buffer): the transparency pass's pipeline.
+    // Same vertex shader + layout as the scene pipeline, its own fragment
+    // shader (scene_transparent.frag) writing the layer's three attachments,
+    // depth test ON against the opaque depth (a transparent surface behind a
+    // wall must not blend) but depth WRITE off (the opaque depth is the
+    // lighting consumers' ground truth).
+    std::unique_ptr<vk::raii::Pipeline> sceneTransparentPipeline;
     std::unique_ptr<vk::raii::DescriptorSetLayout> sceneSetLayout;
     std::unique_ptr<vk::raii::DescriptorPool> sceneDescriptorPool;
     std::unique_ptr<vk::raii::DescriptorSet> sceneDescriptorSet;
@@ -391,6 +438,10 @@ struct RendererState
     // working set fits L2 regardless of where it lives).
     GeometryBuffer primitivesBuffer;
     void *primitivesMapped = nullptr;
+    // Rev 25: how many primitives the LAST uploadSceneData wrote (objects +
+    // occluder proxies). The frame context's primitiveCount reads this - the
+    // shader loops must cover the proxies too.
+    std::uint32_t primitiveUploadCount = 0;
     GeometryBuffer materialsBuffer;
     void *materialsMapped = nullptr;
     GeometryBuffer cameraBufferStorage; // host visible, persistently mapped
@@ -427,12 +478,61 @@ struct RendererState
     {
         GeometryBuffer geometry;
         std::uint32_t indexCount = 0;
+        // Rev 25 (the shadow round): the mesh's LOCAL bbox centre + half
+        // extents, captured from the registry descriptor at upload. The SDF
+        // proxies appended by uploadSceneData need the centre (the bbox is
+        // not always origin-centred - a tree trunk is authored base at the
+        // origin, so its bbox centre rides ABOVE the instance position), and
+        // computing it here - once per handle - keeps the per-dirty-frame
+        // proxy pass free of vertex scans.
+        std::array<float, 3> localBoundsCenter = {0.0f, 0.0f, 0.0f};
+        std::array<float, 3> halfExtents       = {0.0f, 0.0f, 0.0f};
+        // Rev 28 - the per-vocabulary proxy mode, from the registered name:
+        //   Figure - the npc_body_* organic character torsos. ONE shared
+        //            full-figure slab proxy (the parts' four bboxes overlap
+        //            almost completely, so four proxies spent eight
+        //            primitives per villager and overflowed the 1024-
+        //            primitive analytic field on fast frames).
+        //   None   - the other npc_* parts (legs/head/hair): their figure
+        //            slab already covers them.
+        //   Bbox   - everything else (the rev-25 behavior).
+        enum class ProxyMode
+        {
+            Bbox,
+            Figure,
+            None
+        };
+        ProxyMode proxyMode = ProxyMode::Bbox;
     };
     std::unordered_map<std::uint32_t, MeshGpu> meshPool;
     // Mesh handles whose upload failed: skipped with one precise log instead
     // of a per-frame retry storm (the registry keeps the data; a hot reload
     // or pipeline rebuild does not touch this pool).
     std::unordered_map<std::uint32_t, bool> meshUploadFailed;
+
+    // Rev 25 (the shadow round): the terrain heightfield shadow map. The
+    // heightfield is a MESH in the analytic field's terms, so hills cast no
+    // SDF shadow - the light pooled flat over every capture. The renderer
+    // builds one R32_SFLOAT grid from the terrain mesh's vertices at upload
+    // (see fillHeightfieldImage) and publishes it through the
+    // FrameRenderContext; the lighting techniques march it in their shadow
+    // rays (lighting_common.glsl terrainShadow). The image is static (the
+    // terrain never moves) - it is filled exactly once, the first time the
+    // terrain mesh uploads.
+    struct HeightfieldShadow
+    {
+        bool filled = false;
+        // Grid resolution (heightfieldImageExtent) and world mapping.
+        float worldSize  = 0.0f; // metres the grid spans (the mesh bbox XZ)
+        float heightMin  = 0.0f; // sampled heights map [heightMin, heightMax] -> [0, 1]
+        float heightMax  = 1.0f;
+        std::array<float, 3> meshMin = {0.0f, 0.0f, 0.0f}; // world-space bbox min/max
+        std::array<float, 3> meshMax = {0.0f, 0.0f, 0.0f};
+        std::unique_ptr<vk::raii::Image> image;
+        std::unique_ptr<vk::raii::DeviceMemory> memory;
+        std::unique_ptr<vk::raii::ImageView> view;
+    };
+    HeightfieldShadow heightfieldShadow;
 
     // Per-object draw state resolved ONCE per scene refresh, parallel to
     // activeObjects. The geometry pass previously rebuilt every object's
@@ -446,6 +546,18 @@ struct RendererState
         Mat4 model{};                         // translate * rotateY * scale, prebuilt
         std::int32_t albedoLayer   = -1;      // resolved texture-set layer (-1 = flat)
         const GeometryBuffer *mesh = nullptr; // resolved geometry (null -> unit box/sphere)
+        // Rev 25: 1.0 when this object is the water plane (texture set
+        // "water"). The composite-facing ripple/glitter path in scene.frag
+        // keys on this flag (meshBox.w) - the shader has no texture-set
+        // names, only layer indices, and the water branch must not depend on
+        // the layer ordering.
+        float waterFlag = 0.0f;
+        // Rev 31 (the layered depth buffer): the resolved transparency class.
+        // Opaque objects draw in the geometry pass; SemiTransparent objects
+        // draw ONLY in the transparency pass (scene_transparent.frag); a
+        // FullyTransparent object draws in neither yet (classified for the
+        // consumers; the particle round gives the class its first citizens).
+        SceneTransparency transparency = SceneTransparency::Opaque;
     };
     std::vector<ObjectDrawCache> objectDrawCache;
 
@@ -629,6 +741,12 @@ struct RendererState
     // does not hold yet (device idle - this runs on the serialized frame path
     // before any recording).
     void ensureMeshesUploaded();
+    // Rev 29: the daylight scale every emissive surface's authored strength
+    // multiplies at scene-refresh time (one choke point - the primitives
+    // upload AND the draw cache derive from the converted snapshot). Lit
+    // windows and embers read at night, go dark glass in daylight; see the
+    // definition in renderer_scene.cpp.
+    [[nodiscard]] float emissiveDaylightScale() const;
     static SceneObject sceneObjectFromDescriptor(SceneObjectDescriptor object);
     static SceneObjectDescriptor sceneObjectToDescriptor(const SceneObject &object);
     void createTextureArrays();
@@ -637,6 +755,20 @@ struct RendererState
     void loadTextureSets();
     void createArrayImages();
     void uploadArrayLayersAndGenerateMips();
+    // The runtime texture-set growth path (the graphics-uplift round): a mod
+    // that spawns objects naming NEW texture sets after the static [scene]
+    // parse needs those sets registered as GPU array layers, or every one of
+    // its textured objects renders flat fallback albedo forever. The merge
+    // happens in refreshSceneRegistry (the snapshot path); when it added
+    // names, this rebuilds the albedo/data arrays, re-uploads every layer
+    // and rewrites the scene descriptor set (device idle - the refresh runs
+    // serialized on the frame path).
+    void rebuildSceneTextureArrays();
+    // The scene descriptor set's allocation + the four descriptor writes
+    // (camera, primitives, albedo array, data array). createScenePipeline
+    // calls this once at init; rebuildSceneTextureArrays re-runs it after a
+    // pool reset so the new array views bind without touching the pipeline.
+    void writeSceneDescriptors();
     void buildEnvironmentBuffer();
     void
     uploadToDeviceLocal(GeometryBuffer &target, const void *data, vk::DeviceSize byteSize, vk::BufferUsageFlags usages);
@@ -650,6 +782,12 @@ struct RendererState
         vk::BufferUsageFlags usages{};
     };
     void uploadBatchToDeviceLocal(std::vector<BatchedUpload> &uploads);
+    // Rev 25: builds the heightfield shadow grid from a terrain mesh's
+    // vertices (one R32 texel per grid cell, heights normalized to [0, 1]).
+    void fillHeightfieldImage(
+        const SceneMeshDescriptor &mesh, const std::array<float, 3> &boundsMin,
+        const std::array<float, 3> &boundsMax
+    );
     void updateCameraBuffer();
     void createPipelines();
     void createScenePipeline();
@@ -685,6 +823,13 @@ struct RendererState
     void releaseCaptureBuffer();
     void ensureCaptureBuffer();
     void recordGeometryPass(vk::raii::CommandBuffer &commandBuffer, const FrameRenderContext &frameContext);
+    // Rev 31 (the layered depth buffer): the transparency layer's render
+    // pass - transparent objects into the layer's three attachments, depth
+    // tested against the opaque depth, write disabled. No-op when no
+    // transparent object is live (the common indoor capture).
+    void recordTransparencyPass(vk::raii::CommandBuffer &commandBuffer, const FrameRenderContext &frameContext);
+    // The transparency layer's write -> composite-read hand-off barrier.
+    void recordTransparencyHandoffBarrier(vk::raii::CommandBuffer &commandBuffer);
     void recordCompositePass(vk::raii::CommandBuffer &commandBuffer, std::uint32_t imageIndex);
     void recordFrameCommands(vk::raii::CommandBuffer &commandBuffer, std::uint32_t imageIndex);
     // recordFrameCommands phases: the frame-start write-after-read hazard,

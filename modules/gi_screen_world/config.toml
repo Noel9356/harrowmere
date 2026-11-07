@@ -1,0 +1,116 @@
+# Shipped defaults of the gi_screen_world module (the two-space diffuse GI
+# gather: every ray marches the screen-space depth buffer first, then falls
+# back to the exact analytic scene SDF).
+#
+# The module's own configuration layer: the kernel merges it as the lowest
+# defaults layer, so config/engine.toml (and staged overrides) win over
+# anything written here. Defaults FILL: a key a higher layer already
+# provided is never touched.
+#
+# Each knob names the control Unreal exposes for the same stage of Lumen
+# (the mapping verified against Epic's docs + the SIGGRAPH 2022 Lumen course
+# notes - see README.md). Documented in README.md next to this file.
+
+[lighting.gi_screen_world]
+# Master switch: false keeps the module idle even when the run demands the
+# technique's marker (an A/B path for capture comparisons).
+enabled = true
+
+# ---- the world-space stage (the exact analytic SDF fallback) --------------
+# The world ray's bound in metres. The analytic SDF walks the whole scene,
+# so the bound is a cost dial, not a correctness one - rays that exceed it
+# treat the rest of the path as sky (correct outdoors, a handled
+# approximation for caverns deeper than the bound).
+#   ~ Lumen: Post Process "Max Trace Distance" (the world half).
+max_distance = 60.0
+# Sphere-tracing step budget per world ray (the SDF march's early-out keeps
+# the typical cost far below the budget).
+march_steps = 96
+
+# ---- the screen-space stage (the rasterized-truth detail source) ----------
+# Whether gather rays consult this frame's depth buffer before the SDF.
+# false = the world-only A/B (every ray sphere-traces the SDF directly).
+#   ~ Lumen: r.Lumen.ScreenProbeGather.ScreenTraces (the Post Process
+#     "Screen Traces" checkbox).
+screen_trace = true
+# Exponential stride budget for the screen march (5 cm first stride,
+# geometric growth to the bound). Lumen walks hierarchical-Z mips; our
+# linear march uses this budget instead.
+#   ~ Lumen: ...ScreenTraces.HZBTraversal.MaxIterations.
+screen_steps = 24
+# Bisect depth per depth-buffer crossing (the hit lands on the surface,
+# not stride-depth past it).
+screen_refine = 6
+# The screen march's bound in metres - the screen answers the NEAR field;
+# beyond it the world SDF owns the ray.
+#   ~ Lumen: "Max Trace Distance" screen half (200 m there; our chamber
+#     tests live inside 24 m).
+screen_max_distance = 24.0
+# Thickness tolerance base (metres; +5%/m slope in-shader). A stride that
+# crosses a buffered surface by less than this lands on it; more means the
+# stride undersampled the surface and the ray falls back to the world SDF
+# (the linear-step leak guard - Lumen's HZB traversal replaces it).
+screen_thickness = 0.12
+
+# ---- the final gather ------------------------------------------------------
+# Stratified rays per pixel (1-8), each with its own jitter. Variance drops
+# ~sqrt(n); cost scales linearly. 2 = the shipped default.
+#   ~ Lumen: the final-gather quality dial (it tunes probe octahedron
+#     resolution instead - the deliberate per-pixel vs probe difference).
+rays_per_pixel = 2
+# The per-ray indirect radiance clamp (the firefly limit). Rare rays that
+# hit the emissive ceiling panel or a lamp carry an order of magnitude more
+# radiance than a wall bounce; unclamped they are exactly the bright dot
+# lattice no spatial filter can average away. Linear radiance units.
+indirect_clamp = 8.0
+
+# ---- the second bounce (the screen-space radiance memory) -----------------
+# The previous frame's gathered irradiance read at the hit point's
+# reprojection. One texture fetch; off is the one-bounce A/B.
+second_bounce = true
+
+# ---- temporal accumulation -------------------------------------------------
+# The temporal blend's history floor per frame. Static cameras converge
+# ABOVE this floor through the running-average ramp; interactive motion
+# never blends harder than this, so ghosting stays bounded.
+temporal_alpha = 0.125
+# Cap on the running-average ramp (alpha <= N/(N+1)). An uncapped ramp
+# hardens the history into a frozen average that stops tracking the scene.
+#   ~ Lumen: r.Lumen.ScreenProbeGather.Temporal.MaxFramesAccumulated
+#     (default 10 there; 64 here - the capture rig's static cameras rely
+#     on longer convergence, and the cap still keeps the history live).
+temporal_max_frames = 64
+# Reject history where the G-buffer normal at the reprojected uv disagrees
+# with the shaded normal (Lumen's depth+normal rejection; the depth test
+# alone passes a flat wall that slid across the pixel).
+temporal_normal_rejection = true
+
+# ---- short-range screen-space occlusion ------------------------------------
+# Ring radius in px for the post-temporal occlusion term (0 = off, the
+# rev-32 look). Darkens the gathered term where the screen shows nearer
+# geometry - the contact shadow the half-res gather cannot resolve.
+#   ~ Lumen: r.Lumen.ScreenProbeGather.ShortRangeAO (a 16 px band, applied
+#     after the temporal filter so it carries no lag).
+short_range_ao_radius = 0
+# Occlusion gain (the term caps at 75% darkening per pixel).
+short_range_ao_strength = 1.0
+
+# ---- the spatial filter ------------------------------------------------------
+# Kernel radius in gather-resolution px. 1 = the shipped 3x3 Gaussian
+# bilateral (the rev-30 shape); 0 = the unfiltered A/B; 2-4 widen the
+# support for the heavier estimators (rays_per_pixel = 1) at proportionate
+# cost.
+#   ~ Lumen: ScreenProbeGather.SpatialFilterNumPasses (it filters in probe
+#     space instead - see README's deliberate-differences list).
+filter_radius = 1
+
+# ---- output shaping ----------------------------------------------------------
+# Linear scale on the stored indirect term (applied after the temporal
+# blend, so the history keeps the unscaled transport).
+intensity = 1.0
+# Scale on the sky radiance a gather miss returns (0 removes sky bounce,
+# >1 floods the indirect term with skylight).
+sky_miss_scale = 1.0
+# false freezes the jitter's frame phase (a deterministic capture - the A/B
+# harness pins it off; leaves the temporal convergence untouched).
+animated_jitter = true

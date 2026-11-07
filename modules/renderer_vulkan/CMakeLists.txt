@@ -71,6 +71,7 @@ if(ENGINE_BUILD_DEMO AND ENGINE_BUILD_MODULE_RENDERER_VULKAN)
     engine_compile_module_shaders(TARGET engine_module_renderer_vulkan
                                   SOURCES shaders/scene.vert
                                           shaders/scene.frag
+                                          shaders/scene_transparent.frag
                                           shaders/scene_composite.vert
                                           shaders/scene_composite.frag
                                           shaders/scene_bloom_extract.comp

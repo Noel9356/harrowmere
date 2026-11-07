@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "parameters": [
+    {"name": "body.height", "min": 0.75, "max": 1.3, "default": 1.0},
+    {"name": "torso.width", "min": 0.7, "max": 1.4, "default": 1.0},
+    {"name": "torso.height", "min": 0.85, "max": 1.2, "default": 1.0},
+    {"name": "legs.length", "min": 0.7, "max": 1.35, "default": 1.0},
+    {"name": "head.size", "min": 0.8, "max": 1.25, "default": 1.0}
+  ],
+  "rules": [
+    {"parent": "spine.mount", "child": "spine.root", "allowed": true},
+    {"parent": "neck.mount", "child": "neck.root", "allowed": true, "max_child_scale": 1.3},
+    {"parent": "shoulder.mount", "child": "shoulder.root", "allowed": true},
+    {"parent": "wing.mount", "child": "wing.root", "allowed": true, "max_child_scale": 1.3},
+    {"parent": "hip.mount", "child": "hip.root", "allowed": true},
+    {"parent": "tail.mount", "child": "tail.root", "allowed": true, "max_child_scale": 1.3}
+  ],
+  "parts": [
+    {"id": "chimera_torso", "role": "core.torso", "mesh": "chimera_torso", "rest_extent_below": 0.0,
+     "albedo": [0.62, 0.45, 0.28],
+     "bindings": [{"parameter": "torso.width", "coeffs": [0.45, 0.0, 0.30]},
+                   {"parameter": "body.height", "coeffs": [0.15, 0.35, 0.15]}],
+     "connectors": [
+       {"id": "spine", "role": "spine.mount", "position": [0, 0, 0], "max": 1},
+       {"id": "neck", "role": "neck.mount", "position": [0, 0.56, 0.01], "max": 1,
+        "param": {"name": "torso.height", "offset_per_unit": [0, 0.06, 0]}},
+       {"id": "shoulder_left", "role": "shoulder.mount", "position": [0.20, 0.47, 0], "max": 1},
+       {"id": "shoulder_right", "role": "shoulder.mount", "position": [-0.20, 0.47, 0], "max": 1},
+       {"id": "wings", "role": "wing.mount", "position": [0, 0.42, -0.11], "max": 2}
+     ]},
+    {"id": "chimera_pelvis", "role": "pelvis", "mesh": "chimera_pelvis", "rest_extent_below": 0.17,
+     "albedo": [0.40, 0.34, 0.28],
+     "bindings": [{"parameter": "body.height", "coeffs": [0.10, 0.20, 0.10]}],
+     "connectors": [
+       {"id": "spine", "role": "spine.root", "position": [0, 0, 0], "max": 1},
+       {"id": "hip_left", "role": "hip.mount", "position": [0.10, -0.13, 0], "max": 1},
+       {"id": "hip_right", "role": "hip.mount", "position": [-0.10, -0.13, 0], "max": 1},
+       {"id": "tails", "role": "tail.mount", "position": [0, -0.05, -0.10], "max": 2}
+     ]},
+    {"id": "chimera_leg_digi_left", "role": "legs", "mesh": "chimera_leg_digi_left", "rest_extent_below": 0.85,
+     "albedo": [0.35, 0.30, 0.26],
+     "bindings": [{"parameter": "legs.length", "coeffs": [0.0, 0.5, 0.0]},
+                   {"parameter": "body.height", "coeffs": [0.0, 0.15, 0.0]}],
+     "connectors": [{"id": "hip", "role": "hip.root", "position": [0, 0, 0], "max": 1}]},
+    {"id": "chimera_leg_digi_right", "role": "legs", "mesh": "chimera_leg_digi_right", "rest_extent_below": 0.85,
+     "albedo": [0.35, 0.30, 0.26],
+     "bindings": [{"parameter": "legs.length", "coeffs": [0.0, 0.5, 0.0]},
+                   {"parameter": "body.height", "coeffs": [0.0, 0.15, 0.0]}],
+     "connectors": [{"id": "hip", "role": "hip.root", "position": [0, 0, 0], "max": 1}]},
+    {"id": "chimera_arm_left", "role": "arm", "mesh": "chimera_arm_left", "rest_extent_below": 0.605,
+     "albedo": [0.55, 0.42, 0.30],
+     "bindings": [{"parameter": "body.height", "coeffs": [0.10, 0.25, 0.10]}],
+     "connectors": [{"id": "shoulder", "role": "shoulder.root", "position": [0, 0, 0], "max": 1}]},
+    {"id": "chimera_arm_right", "role": "arm", "mesh": "chimera_arm_right", "rest_extent_below": 0.605,
+     "albedo": [0.55, 0.42, 0.30],
+     "bindings": [{"parameter": "body.height", "coeffs": [0.10, 0.25, 0.10]}],
+     "connectors": [{"id": "shoulder", "role": "shoulder.root", "position": [0, 0, 0], "max": 1}]},
+    {"id": "chimera_wing_left", "role": "wing", "mesh": "chimera_wing_left", "rest_extent_below": 0.17,
+     "albedo": [0.55, 0.32, 0.20], "animation": "wing_idle", "amplitude": 0.14, "speed": 0.5,
+     "connectors": [{"id": "root", "role": "wing.root", "position": [0, 0, 0], "max": 1}]},
+    {"id": "chimera_wing_right", "role": "wing", "mesh": "chimera_wing_right", "rest_extent_below": 0.17,
+     "albedo": [0.55, 0.32, 0.20], "animation": "wing_idle", "amplitude": 0.14, "speed": 0.5,
+     "connectors": [{"id": "root", "role": "wing.root", "position": [0, 0, 0], "max": 1}]},
+    {"id": "chimera_tail", "role": "tail", "mesh": "chimera_tail", "rest_extent_below": 0.15,
+     "albedo": [0.35, 0.48, 0.30], "animation": "tail_wag", "amplitude": 0.45, "speed": 1.1,
+     "connectors": [{"id": "root", "role": "tail.root", "position": [0, 0, 0], "max": 1}]},
+    {"id": "chimera_head_canine", "role": "head", "mesh": "chimera_head_canine", "rest_extent_below": 0.0,
+     "albedo": [0.48, 0.36, 0.24],
+     "bindings": [{"parameter": "head.size", "coeffs": [0.25, 0.25, 0.25]}],
+     "connectors": [{"id": "neck", "role": "neck.root", "position": [0, 0, 0], "max": 1}]},
+    {"id": "chimera_head_avian", "role": "head", "mesh": "chimera_head_avian", "rest_extent_below": 0.0,
+     "albedo": [0.60, 0.45, 0.20],
+     "bindings": [{"parameter": "head.size", "coeffs": [0.25, 0.25, 0.25]}],
+     "connectors": [{"id": "neck", "role": "neck.root", "position": [0, 0, 0], "max": 1}]}
+  ],
+  "profiles": [
+    {"id": "hybrid_chimera", "roles": [
+      {"role": "core.torso", "min": 1, "max": 1},
+      {"role": "pelvis", "min": 1, "max": 1},
+      {"role": "head", "min": 1, "max": 1},
+      {"role": "legs", "min": 2, "max": 2},
+      {"role": "arm", "min": 2, "max": 2},
+      {"role": "wing", "min": 0, "max": 2},
+      {"role": "tail", "min": 0, "max": 2}
+    ]}
+  ]
+}

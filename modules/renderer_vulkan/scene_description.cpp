@@ -208,6 +208,29 @@ bool SceneDescription::parseFromConfiguration(
             error = "scene object " + std::to_string(object) + " needs uv_scale > 0";
             return false;
         }
+        // Rev 31 (the layered depth buffer): the optional transparency class.
+        // Opaque stays the default; "semi" fills the transparency layer, "full"
+        // classifies fully-transparent (no surface contribution yet).
+        if (const std::string transparency
+            = context.configurationStringInSection("scene", prefix + ".transparency").value_or(std::string());
+            !transparency.empty())
+        {
+            if (transparency == "opaque")
+            {
+                parsed.transparency = SceneTransparency::Opaque;
+            } else if (transparency == "semi")
+            {
+                parsed.transparency = SceneTransparency::SemiTransparent;
+            } else if (transparency == "full")
+            {
+                parsed.transparency = SceneTransparency::FullyTransparent;
+            } else
+            {
+                error = "scene object " + std::to_string(object) + " has unknown transparency '" + transparency
+                      + "' (known: opaque, semi, full)";
+                return false;
+            }
+        }
         scene.objects.push_back(parsed);
     }
 

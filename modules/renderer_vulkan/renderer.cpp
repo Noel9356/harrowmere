@@ -236,8 +236,9 @@ void RendererModule::construct(
     const long long frames = context.configurationInteger("max_frames_in_flight").value_or(defaultFramesInFlight);
 
     state->maxFramesInFlight = static_cast<std::uint32_t>(std::clamp<std::int64_t>(frames, 1, maxFramesInFlightLimit));
-    state->exposure          = static_cast<float>(context.configurationFloating("exposure").value_or(1.15));
-    state->tonemapMode       = context.configurationString("tonemap").value_or("aces");
+    state->configuredExposure = static_cast<float>(context.configurationFloating("exposure").value_or(1.15));
+    state->exposure           = state->configuredExposure;
+    state->tonemapMode        = context.configurationString("tonemap").value_or("aces");
 
     // Bloom (post-processing): opt-in, thresholded HDR bright pass + separable
     // blur, added back pre-tonemap (scene_composite_final.frag).
@@ -681,7 +682,8 @@ void RendererModule::handleConfigurationReloaded(
     };
     if (touches("exposure"))
     {
-        state->exposure = static_cast<float>(boundContext->configurationFloating("exposure").value_or(1.15));
+        state->configuredExposure = static_cast<float>(boundContext->configurationFloating("exposure").value_or(1.15));
+        state->exposure           = state->configuredExposure;
         logger->logMessage(LogLevel::Information, logPrefix + "reloaded exposure");
     }
     if (touches("tonemap"))

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "profile": "hybrid_chimera",
+  "parameters": {"torso.width": 1.35, "legs.length": 1.2, "head.size": 1.15},
+  "parts": [
+    {"id": "torso", "asset": "chimera_torso", "albedo": [0.45, 0.50, 0.62]},
+    {"id": "pelvis", "asset": "chimera_pelvis"},
+    {"id": "head", "asset": "chimera_head_avian"},
+    {"id": "arm_left", "asset": "chimera_arm_left"},
+    {"id": "arm_right", "asset": "chimera_arm_right"},
+    {"id": "leg_left", "asset": "chimera_leg_digi_left"},
+    {"id": "leg_right", "asset": "chimera_leg_digi_right"},
+    {"id": "tail_a", "asset": "chimera_tail", "albedo": [0.35, 0.48, 0.30]},
+    {"id": "tail_b", "asset": "chimera_tail", "albedo": [0.55, 0.35, 0.45]}
+  ],
+  "connections": [
+    {"parent": "torso", "parent_connector": "spine", "child": "pelvis", "child_connector": "spine"},
+    {"parent": "torso", "parent_connector": "neck", "child": "head", "child_connector": "neck"},
+    {"parent": "torso", "parent_connector": "shoulder_left", "child": "arm_left", "child_connector": "shoulder"},
+    {"parent": "torso", "parent_connector": "shoulder_right", "child": "arm_right", "child_connector": "shoulder"},
+    {"parent": "pelvis", "parent_connector": "hip_left", "child": "leg_left", "child_connector": "hip"},
+    {"parent": "pelvis", "parent_connector": "hip_right", "child": "leg_right", "child_connector": "hip"},
+    {"parent": "pelvis", "parent_connector": "tails", "child": "tail_a", "child_connector": "root", "offset": [0.05, 0, 0]},
+    {"parent": "pelvis", "parent_connector": "tails", "child": "tail_b", "child_connector": "root", "offset": [-0.05, 0, 0]}
+  ]
+}

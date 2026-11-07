@@ -51,6 +51,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <iterator>
 #include <memory>
@@ -79,6 +81,9 @@
 #include "data/mod_overrides.hpp"
 #include "bridge/scene_bridge.hpp"
 #include "bridge/terrain.hpp"          // task 5.1.2: the deterministic heightfield (heightAt is the ONE height door)
+#include "bridge/character_lab.hpp" // rev 34: the character-customisation loader
+
+#include <iostream> // the lab's mesh-refusal diagnostic (remove with the lab round's debug pass)
 #include "bridge/scatter.hpp"          // task 5.2.1: scatter placements (data + seed)
 #include "bridge/borders.hpp"          // task 5.2.2: water + territory borders
 #include "bridge/atmosphere.hpp"       // task 5.1.4: sky/sun/weather on screen
@@ -339,6 +344,9 @@ public:
         : scene_(scene), lighting_(lighting)
     {}
 
+    // The rev-24 lamp point-light pool (pushPointLights reconciles it).
+    std::vector<engine::LightingCapability::PointLightHandle> lamp_light_handles_;
+
     Handle spawnBox(
         const Position &center, float halfWidth, float height, const std::array<float, 3> &tint
     ) override
@@ -395,6 +403,24 @@ public:
         );
     }
 
+    // rev 26: the pose path carries the yaw through to the registry (the
+    // blocky character parts move every frame; the position-only override
+    // above would have reset each villager's facing to 0 on the first step).
+    void setObjectPose(
+        Handle handle, const Position &p, float rotationYRadians
+    ) override
+    {
+        if (scene_ == nullptr || handle == NULL_HANDLE)
+        {
+            return;
+        }
+        (void)scene_->setObjectTransform(
+            static_cast<engine::SceneCapability::ObjectHandle>(handle),
+            {static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z)},
+            rotationYRadians
+        );
+    }
+
     void setSunLight(
         const std::array<float, 3> &direction, float intensity
     ) override
@@ -404,11 +430,179 @@ public:
             return; // degraded run (no lighting provider): the sun seam is silent
         }
         engine::DirectionalLightDescription sun;
-        sun.direction[0] = direction[0];
-        sun.direction[1] = direction[1];
-        sun.direction[2] = direction[2];
-        sun.intensity    = intensity;
+        if (intensity <= SUN_ELEVATION_EPSILON)
+        {
+            // Night (A-186): the moon takes over as the directional light -
+            // same seam, cooler color, the pinned moon irradiance/direction.
+            sun.direction[0] = MOON_DIRECTION[0];
+            sun.direction[1] = MOON_DIRECTION[1];
+            sun.direction[2] = MOON_DIRECTION[2];
+            sun.color[0]     = 0.72f;
+            sun.color[1]     = 0.80f;
+            sun.color[2]     = 1.0f;
+            sun.intensity    = MOON_IRRADIANCE;
+        } else
+        {
+            // Day (A-186): the bridge's [0, 1] elevation intensity scales to
+            // the pinned noon irradiance; the key light follows the sun's
+            // elevation (rev 24's golden hour — the direct path and the
+            // environment state's sunColor use the same curve, so both
+            // lighting paths agree at every hour).
+            sun.direction[0] = direction[0];
+            sun.direction[1] = direction[1];
+            sun.direction[2] = direction[2];
+            const float elevation = -direction[1]; // travel direction points down; y = -height
+            const float t         = std::clamp((elevation - 0.10f) / 0.40f, 0.0f, 1.0f);
+            const float curve     = t * t * (3.0f - 2.0f * t);
+            sun.color[0]     = 1.0f;
+            sun.color[1]     = 0.68f + 0.29f * curve;
+            sun.color[2]     = 0.42f + 0.48f * curve;
+            sun.intensity    = intensity * SUN_IRRADIANCE_SCALE;
+        }
         lighting_->setSunLight(sun);
+    }
+
+    // The graphics-uplift round: forward the bridge's environment state into
+    // the registry's runtime override (the renderer merges it over [scene]).
+    void setEnvironmentState(const bridge::SceneEnvironmentState &state) override
+    {
+        if (scene_ == nullptr)
+        {
+            return;
+        }
+        engine::SceneEnvironmentOverride overrideState;
+        overrideState.skyZenith      = state.skyZenith;
+        overrideState.skyHorizon     = state.skyHorizon;
+        overrideState.skyGround      = state.skyGround;
+        overrideState.fogDensity     = state.fogDensity;
+        overrideState.fogTint        = state.fogTint;
+        overrideState.exposure       = state.exposure;
+        overrideState.moonDirection  = state.moonDirection;
+        overrideState.moonIntensity  = state.moonIntensity;
+        overrideState.sunColor       = state.sunColor;
+        overrideState.sunIntensity   = state.sunIntensity;
+        overrideState.sunDirection   = state.sunDirection;
+        scene_->setEnvironment(overrideState);
+    }
+
+    // Textured box/sphere spawns (the prop compositions + character heads).
+    Handle spawnBoxTextured(
+        const Position &center, float halfWidth, float height, const std::array<float, 3> &tint,
+        const char *textureSet, float uvScale, float emissiveStrength
+    ) override
+    {
+        if (scene_ == nullptr)
+        {
+            return NULL_HANDLE;
+        }
+        engine::SceneObjectDescriptor object;
+        object.type             = engine::scene_object_type::box;
+        object.position         = {static_cast<float>(center.x), static_cast<float>(center.y), static_cast<float>(center.z)};
+        object.size             = {halfWidth, height, halfWidth};
+        object.albedo           = tint;
+        object.roughness        = 0.85f;
+        object.emissiveStrength = emissiveStrength;
+        object.textureSet       = textureSet;
+        object.uvScale          = uvScale;
+        const auto handle       = scene_->addObject(object);
+        return handle == engine::SceneCapability::invalidObject ? NULL_HANDLE : static_cast<Handle>(handle);
+    }
+
+    // rev 30: the per-axis extents variant (the GI chamber's walls): the
+    // registry boxes take a full half-extent triple, so this is the honest
+    // form the square halfWidth helper above approximates.
+    Handle spawnBoxExtents(
+        const Position &center, float halfExtentX, float halfExtentY, float halfExtentZ,
+        const std::array<float, 3> &tint, const char *textureSet, float uvScale, float emissiveStrength
+    ) override
+    {
+        if (scene_ == nullptr)
+        {
+            return NULL_HANDLE;
+        }
+        engine::SceneObjectDescriptor object;
+        object.type             = engine::scene_object_type::box;
+        object.position         = {static_cast<float>(center.x), static_cast<float>(center.y), static_cast<float>(center.z)};
+        object.size             = {halfExtentX, halfExtentY, halfExtentZ};
+        object.albedo           = tint;
+        object.roughness        = 0.85f;
+        object.emissiveStrength = emissiveStrength;
+        object.textureSet       = textureSet;
+        object.uvScale          = uvScale;
+        const auto handle       = scene_->addObject(object);
+        return handle == engine::SceneCapability::invalidObject ? NULL_HANDLE : static_cast<Handle>(handle);
+    }
+
+    Handle spawnSphereTextured(
+        const Position &center, float radius, const std::array<float, 3> &tint, const char *textureSet, float uvScale
+    ) override
+    {
+        if (scene_ == nullptr)
+        {
+            return NULL_HANDLE;
+        }
+        engine::SceneObjectDescriptor object;
+        object.type       = engine::scene_object_type::sphere;
+        object.position   = {static_cast<float>(center.x), static_cast<float>(center.y), static_cast<float>(center.z)};
+        object.size       = {radius, radius, radius};
+        object.albedo     = tint;
+        object.roughness  = 0.85f;
+        object.textureSet = textureSet;
+        object.uvScale    = uvScale;
+        const auto handle = scene_->addObject(object);
+        return handle == engine::SceneCapability::invalidObject ? NULL_HANDLE : static_cast<Handle>(handle);
+    }
+
+    // The A-151 water plane: one flat two-triangle mesh at the sea level,
+    // the size of the world patch. Mesh primitives are skipped by the
+    // analytic tracer (no shadow), and the world-planar UV tiles the water
+    // texture set across the patch.
+    Handle spawnWaterPlane(double extentM) override
+    {
+        if (scene_ == nullptr)
+        {
+            return NULL_HANDLE;
+        }
+        const float extent = static_cast<float>(extentM);
+        engine::SceneMeshDescriptor mesh;
+        // Two triangles over [0, extent] on x/z, sunk WATER_SINK_M below the
+        // sea-level datum. Rev 24: the sink was 2.0 m - and the rev-24
+        // world scan (HARROWMERE_DUMP_TERRAIN) showed the suite seed's
+        // heightfield NEVER dips below the datum (world minimum 0.00 at
+        // 10496,256), so a 2 m sunken plane was buried under the land and
+        // the world had NO visible water anywhere. 0.3 m keeps the datum-
+        // level village flats dry (their ground sits exactly at 0.0, a
+        // 0.3 m clearance never z-fights) while every basin that reaches
+        // the datum reads as a shallow lake.
+        constexpr float kWaterSinkM = 0.3f;
+        mesh.vertices = {
+            0.0f,     -kWaterSinkM, 0.0f,     0.0f, 1.0f, 0.0f,
+            extent,   -kWaterSinkM, 0.0f,     0.0f, 1.0f, 0.0f,
+            extent,   -kWaterSinkM, extent,   0.0f, 1.0f, 0.0f,
+            0.0f,     -kWaterSinkM, extent,   0.0f, 1.0f, 0.0f,
+        };
+        mesh.indices = {0, 2, 1, 0, 3, 2};
+        const auto meshHandle = scene_->addMesh("water_plane", mesh);
+        if (meshHandle == engine::SceneCapability::invalidMesh)
+        {
+            return NULL_HANDLE;
+        }
+        engine::SceneObjectDescriptor object;
+        object.type       = engine::scene_object_type::mesh;
+        object.meshHandle = meshHandle;
+        object.size       = {extent * 0.5f, 0.5f, extent * 0.5f};
+        object.albedo     = paletteColor("water");
+        object.roughness  = 0.08f; // water is the one mirror-rough surface
+        object.textureSet = "water";
+        object.uvScale    = 64.0f;
+        // Rev 31 (the layered depth buffer): water is the first semi-
+        // transparent citizen. It leaves the opaque G-buffer and fills the
+        // transparency layer - the composite blends it over the seabed/sky
+        // behind it with a per-pixel depth-delta opacity, so shallow shore
+        // water finally reads as water (see-through) over real seabed.
+        object.transparency = engine::scene_object_transparency::semi_transparent;
+        const auto handle = scene_->addObject(object);
+        return handle == engine::SceneCapability::invalidObject ? NULL_HANDLE : static_cast<Handle>(handle);
     }
 
     // Phase 5: spawn a sphere (character presence). The scene registry's
@@ -427,6 +621,123 @@ public:
         object.roughness  = 0.6f;
         const auto handle = scene_->addObject(object);
         return handle == engine::SceneCapability::invalidObject ? NULL_HANDLE : static_cast<Handle>(handle);
+    }
+
+    // The prop-mesh vocabulary (rev 24): register one triangle mesh under a
+    // stable name; spawn instances that address it by name. Registration is
+    // idempotent per name (the registry dedupes through meshHandle(name)),
+    // so a bridge restart inside one run cannot burn a second mesh slot.
+    Handle registerPropMesh(
+        const char *name, const std::vector<float> &vertices, const std::vector<std::uint32_t> &indices
+    ) override
+    {
+        if (scene_ == nullptr || name == nullptr || vertices.empty() || indices.empty())
+            return NULL_HANDLE;
+        const std::string nameString(name);
+        if (const auto known = scene_->meshHandle(nameString); known != engine::SceneCapability::invalidMesh)
+            return static_cast<Handle>(known);
+        engine::SceneMeshDescriptor mesh;
+        mesh.vertices = vertices;
+        mesh.indices  = indices;
+        const auto meshHandle = scene_->addMesh(nameString, mesh);
+        return meshHandle == engine::SceneCapability::invalidMesh ? NULL_HANDLE : static_cast<Handle>(meshHandle);
+    }
+
+    Handle spawnPropMeshInstance(
+        const char *meshName, const Position &center, float rotationY,
+        const std::array<float, 3> &tint, const char *textureSet, float uvScale
+    ) override
+    {
+        if (scene_ == nullptr || meshName == nullptr)
+            return NULL_HANDLE;
+        const auto meshHandle = scene_->meshHandle(std::string(meshName));
+        if (meshHandle == engine::SceneCapability::invalidMesh)
+            return NULL_HANDLE;
+        engine::SceneObjectDescriptor object;
+        object.type             = engine::scene_object_type::mesh;
+        object.meshHandle       = meshHandle;
+        object.position         = {static_cast<float>(center.x), static_cast<float>(center.y), static_cast<float>(center.z)};
+        object.rotationYRadians = rotationY;
+        object.albedo           = tint;
+        object.roughness        = 0.85f;
+        object.textureSet       = textureSet != nullptr ? textureSet : "";
+        object.uvScale          = uvScale;
+        const auto handle       = scene_->addObject(object);
+        return handle == engine::SceneCapability::invalidObject ? NULL_HANDLE : static_cast<Handle>(handle);
+    }
+
+    // rev 34: the character-assembly path - the same spawn with the part's
+    // per-axis parameter scale riding the descriptor (the renderer applies
+    // the same scales to the drawn vertices and the tracing proxy).
+    Handle spawnPropMeshInstanceScaled(
+        const char *meshName, const Position &center, float rotationY,
+        const std::array<float, 3> &tint, const char *textureSet, float uvScale,
+        const std::array<float, 3> &scale
+    ) override
+    {
+        if (scene_ == nullptr || meshName == nullptr)
+            return NULL_HANDLE;
+        const auto meshHandle = scene_->meshHandle(std::string(meshName));
+        if (meshHandle == engine::SceneCapability::invalidMesh)
+        {
+            std::cerr << "[character_lab] mesh not registered: '" << meshName << "'\n";
+            return NULL_HANDLE;
+        }
+        engine::SceneObjectDescriptor object;
+        object.type             = engine::scene_object_type::mesh;
+        object.meshHandle       = meshHandle;
+        object.position         = {static_cast<float>(center.x), static_cast<float>(center.y), static_cast<float>(center.z)};
+        object.rotationYRadians = rotationY;
+        object.albedo           = tint;
+        object.roughness        = 0.85f;
+        object.textureSet       = textureSet != nullptr ? textureSet : "";
+        object.uvScale          = uvScale;
+        object.scale            = scale;
+        const auto handle       = scene_->addObject(object);
+        return handle == engine::SceneCapability::invalidObject ? NULL_HANDLE : static_cast<Handle>(handle);
+    }
+
+    // The village lamp point lights (rev 24): the bridge pushes the window's
+    // lamps once per frame; this adapter reconciles its LightingCapability
+    // handle pool (add/update/remove) against the push. The pbr direct state
+    // and the GI relight both read this capability, so the lamps light the
+    // night ground through the same pass the sun rides.
+    void pushPointLights(
+        const std::vector<LampLight> &lights
+    ) override
+    {
+        if (lighting_ == nullptr)
+            return;
+        const std::size_t wanted = std::min<std::size_t>(lights.size(), 16);
+        // Grow the pool.
+        while (lamp_light_handles_.size() < wanted)
+        {
+            engine::PointLightDescription empty;
+            const auto handle = lighting_->addPointLight(empty);
+            if (handle == engine::LightingCapability::invalidPointLight)
+                break;
+            lamp_light_handles_.push_back(handle);
+        }
+        // Shrink the pool.
+        while (lamp_light_handles_.size() > wanted)
+        {
+            lighting_->removePointLight(lamp_light_handles_.back());
+            lamp_light_handles_.pop_back();
+        }
+        // Update the live pool from the push.
+        for (std::size_t i = 0; i < lamp_light_handles_.size(); ++i)
+        {
+            engine::PointLightDescription light;
+            light.position[0] = static_cast<float>(lights[i].position.x);
+            light.position[1] = static_cast<float>(lights[i].position.y);
+            light.position[2] = static_cast<float>(lights[i].position.z);
+            light.color[0]    = lights[i].color[0];
+            light.color[1]    = lights[i].color[1];
+            light.color[2]    = lights[i].color[2];
+            light.intensity   = lights[i].intensity;
+            light.radius      = lights[i].radius;
+            lighting_->updatePointLight(lamp_light_handles_[i], light);
+        }
     }
 
     // Phase 5: spawn the terrain mesh. The bridge passes a flat (x, y, z)
@@ -474,7 +785,37 @@ public:
             }
         }
 
-        // Compute normals via central difference on the coarse grid.
+        if (std::getenv("HARROWMERE_DUMP_TERRAIN") != nullptr)
+        {
+            // rev 23 diagnosis: the coarse vertices the GPU actually
+            // receives around the west-coast camera - compare against the
+            // bridge's [terrain-at] analytic samples for the same region.
+            for (std::size_t v = 0; v + 2 < mesh.vertices.size(); v += 6)
+            {
+                const float vx = mesh.vertices[v];
+                const float vy = mesh.vertices[v + 1];
+                const float vz = mesh.vertices[v + 2];
+                if (vx <= 1100.0f && vz >= 7600.0f && vz <= 8700.0f)
+                {
+                    std::fprintf(stderr, "[mesh-vertex] (%.1f,%.2f,%.1f)\n", vx, vy, vz);
+                }
+            }
+        }
+
+        // Compute normals via central difference on the coarse grid. The
+        // height deltas DIVIDE by the coarse grid spacing (metres per grid
+        // cell): the previous body fed the raw metre deltas into the normal,
+        // so every 125 m neighbour gap of 10-30 m relief tilted the normal
+        // nearly into the ground plane (y ~ 0.05) - nDotL went negative for
+        // most of the world and the sun block skipped, shading the terrain
+        // black. The slope (delta / spacing) is the dimensionless tangent the
+        // normal actually wants.
+        float extentX = 0.0f;
+        for (std::size_t v = 0; v + 2 < mesh.vertices.size(); v += 6)
+        {
+            extentX = std::max(extentX, mesh.vertices[v]);
+        }
+        const float gridSpacing = coarseSteps > 1 ? extentX / static_cast<float>(coarseSteps - 1) : 1.0f;
         for (std::uint32_t row = 0; row < coarseSteps; ++row)
         {
             for (std::uint32_t col = 0; col < coarseSteps; ++col)
@@ -492,8 +833,8 @@ public:
                 const auto pR  = pos(static_cast<int>(row), static_cast<int>(col) + 1);
                 const auto pD  = pos(static_cast<int>(row) - 1, static_cast<int>(col));
                 const auto pU  = pos(static_cast<int>(row) + 1, static_cast<int>(col));
-                const float dx = (pR[1] - pL[1]) * 0.5f;
-                const float dz = (pU[1] - pD[1]) * 0.5f;
+                const float dx = (pR[1] - pL[1]) * 0.5f / gridSpacing;
+                const float dz = (pU[1] - pD[1]) * 0.5f / gridSpacing;
                 float nx = -dx, ny = 1.0f, nz = -dz;
                 const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
                 if (len > 0.0f)
@@ -534,18 +875,52 @@ public:
             return NULL_HANDLE;
 
         // Add a mesh scene object that instances it. The size is the
-        // bounding-box half extents (the registry computes these from the
-        // mesh, but we need to set them for the tracing proxy).
+        // bounding-box half extents: measured from the subsampled vertices
+        // (the previous vertices[0] read took the FIRST VERTEX's x — 0.0 —
+        // for the extent, collapsing the tracing proxy to a zero-width
+        // sliver at the origin).
         engine::SceneObjectDescriptor object;
         object.type       = engine::scene_object_type::mesh;
         object.meshHandle = meshHandle;
-        // The terrain spans [0, worldExtent] on x/z; y range is ~[0, 120].
-        const float halfExtent = static_cast<float>(vertices.size() >= 3 ? vertices[0] : 8000.0); // rough
-        object.size            = {halfExtent, 60.0f, halfExtent};                                 // proxy box
-        object.albedo          = {0.20f, 0.35f, 0.12f}; // grass green (fallback if no texture)
+        float minX = 0.0f, maxX = 0.0f, minY = 0.0f, maxY = 0.0f, minZ = 0.0f, maxZ = 0.0f;
+        bool first = true;
+        for (std::size_t v = 0; v + 2 < mesh.vertices.size(); v += 6)
+        {
+            const float x = mesh.vertices[v], y = mesh.vertices[v + 1], z = mesh.vertices[v + 2];
+            if (first)
+            {
+                minX = maxX = x;
+                minY = maxY = y;
+                minZ = maxZ = z;
+                first       = false;
+            } else
+            {
+                minX = std::min(minX, x);
+                maxX = std::max(maxX, x);
+                minY = std::min(minY, y);
+                maxY = std::max(maxY, y);
+                minZ = std::min(minZ, z);
+                maxZ = std::max(maxZ, z);
+            }
+        }
+        const float cx  = (minX + maxX) * 0.5f;
+        const float cy  = (minY + maxY) * 0.5f;
+        const float cz  = (minZ + maxZ) * 0.5f;
+        object.size     = {std::max((maxX - minX) * 0.5f, 0.5f), std::max((maxY - minY) * 0.5f, 0.5f),
+                           std::max((maxZ - minZ) * 0.5f, 0.5f)};
+        // POSITION STAYS (0,0,0): registered meshes draw as translate(position)
+        // * authored vertices (rebuildObjectDrawCache scales unit meshes only),
+        // so the terrain's [0, extent] vertices bind to the origin transform.
+        // Only the proxy SIZE above is the measured bounds (cx/cy/cz name the
+        // bounds center for the comment; the proxy box itself is what the
+        // tracing consumers and physics read through size + position).
+        (void)cx;
+        (void)cy;
+        (void)cz;
+        object.albedo   = {0.20f, 0.35f, 0.12f}; // grass green (fallback if no texture)
         object.roughness       = 0.95f;
         object.textureSet      = "grass"; // PBR texture set (assets/textures/grass/)
-        object.uvScale         = 64.0f;   // tile the 512px texture every 64m
+        object.uvScale         = TERRAIN_UV_TILE_M; // A-182: one tile per 4 world metres
         const auto handle      = scene_->addObject(object);
         return handle == engine::SceneCapability::invalidObject ? NULL_HANDLE : static_cast<Handle>(handle);
     }
@@ -1547,6 +1922,9 @@ public:
         // The event bus: the two lane subscriptions bind here (start()).
         bus_ = &context.eventBus();
         busSimEvents_.bind(bus_); // the 0.7 justice publications forward here (4.x)
+        // The context: start()'s capture-scenario staging reads the staged
+        // "harrowmere.*" overrides through the same typed section readers.
+        context_ = &context;
 
         // The lighting provider (the bridge's sun): the manifest demands
         // "lighting" + "pbr_direct_diffuse" (see mod.toml - optional could
@@ -1557,6 +1935,15 @@ public:
         if (context.isCapabilityAvailable("lighting"))
         {
             lighting_ = static_cast<engine::LightingCapability *>(context.acquireCapability("lighting"));
+        }
+        // rev 34: the character-customisation capability - mod.toml DEMANDS
+        // it (the kernel's required-capability closure pins the provider),
+        // but the probe keeps the degrade-if-absent shape uniform with the
+        // other optional seams.
+        if (context.isCapabilityAvailable("character_customisation"))
+        {
+            character_customisation_ = static_cast<engine::CharacterCustomisationCapability *>(
+                context.acquireCapability("character_customisation"));
         }
         // Match the kernel's disabled-mod filtering during our later data
         // package pass. ComponentContext exposes the assembly's [engine]
@@ -1681,9 +2068,163 @@ public:
         // the 7.2P1 bridge).
         subscribeLanes();
 
+        // ---- capture-scenario staging (the app stages the "harrowmere.*"
+        // keys; this is the only place that reads them) ---------------------
+        // A start()-scoped source over the same context (the construct-time
+        // source is out of scope here; the context outlives both).
+        const ContextConfigSource stageSource(*context_);
+        (void)stageSource;
+        // time_of_day_game_hours: the staged hour replaces the 10:00 epoch
+        // (the capture suite's day/night/walk scenarios pin their hours).
+        // The app stages the value as a TOML float, so the read is the
+        // context's typed floating reader (a string read never matches).
+        if (const auto hours = context_->configurationFloatingInSection("harrowmere", "time_of_day_game_hours");
+            hours.has_value())
+        {
+            clock_.worldTime = static_cast<std::uint64_t>(std::clamp(*hours, 0.0, 23.999) * 3600.0);
+        }
+
         // The player spawns at the beginner kingdom's safe village (1.5
         // stage 4; the design rule: safe zones are spawn points).
         player_.position = genResult_.playerSpawn;
+        // rev 26: the real spawn village center - the street-level camera
+        // staging anchors on it (the default scene.toml look_at does NOT
+        // name the village).
+        if (std::getenv("HARROWMERE_DUMP_TERRAIN") != nullptr)
+        {
+            std::fprintf(stderr, "[player-spawn] (%.1f,%.1f)\n", genResult_.playerSpawn.x, genResult_.playerSpawn.z);
+            if (terrainField_ != nullptr)
+            {
+                for (double rz = -100.0; rz <= 100.0; rz += 25.0)
+                {
+                    for (double rx = -100.0; rx <= 100.0; rx += 25.0)
+                    {
+                        std::fprintf(stderr, "[spawn-at] (%.0f,%.0f) h=%.2f\n",
+                            genResult_.playerSpawn.x + rx, genResult_.playerSpawn.z + rz,
+                            terrainField_->heightAt(genResult_.playerSpawn.x + rx, genResult_.playerSpawn.z + rz));
+                    }
+                }
+            }
+        }
+
+        // capture_scenario: the scenario name re-places the player (the
+        // follow camera frames whatever the player stands next to, so the
+        // walk/coast/frontier views come from the player's own position).
+        const auto scenarioName = context_->configurationStringInSection("harrowmere", "capture_scenario");
+        if (scenarioName.has_value() && !scenarioName->empty())
+        {
+            const auto &territories = world_->territories();
+            if (*scenarioName == "walk_village")
+            {
+                // Street level IN THE PINNED CAPTURE VILLAGE: the rig's scene
+                // file frames the spawn village (the aerial shots' subject),
+                // so the walk view re-places the player at the village's
+                // market square (playerSpawn IS the territory center; the
+                // settlement spiral keeps its first 6 m clear), on the
+                // terrain. The previous beginner-territory indirection moved
+                // the player 2.4 km from the framed village - the follow
+                // camera then stared across empty land - and a +14/+10 offset
+                // would now stand inside the A-150 house ring itself.
+                player_.position = {genResult_.playerSpawn.x + 3.0, 0.0, genResult_.playerSpawn.z + 2.0};
+                if (terrainField_ != nullptr)
+                {
+                    player_.position.y = terrainField_->heightAt(player_.position.x, player_.position.z);
+                }
+            } else if (*scenarioName == "walk_frontier")
+            {
+                // The farthest territory's center: the frontier view.
+                const auto &frontier = territories.rbegin();
+                if (frontier != territories.rend())
+                {
+                    const Position center = world::regionCenter(frontier->second.region);
+                    player_.position      = {center.x + 6.0, 0.0, center.z + 6.0};
+                    if (terrainField_ != nullptr)
+                    {
+                        player_.position.y = terrainField_->heightAt(player_.position.x, player_.position.z);
+                    }
+                }
+            } else if (*scenarioName == "coast")
+            {
+                // The shore ABOVE the water line: the follow camera's eye rides
+                // player.y + PLAYER_EYE_HEIGHT_M, and the previous fixed
+                // (490, 8050) stage sat below the A-151 sea level datum - the
+                // eye ended under the water plane and the whole view read
+                // black. Walk +x from the staged point to the first spot the
+                // terrain clears the datum by a body's height, then face the
+                // sea (the rig's look aims the same way).
+                {
+                    double shoreX = 490.0;
+                    if (terrainField_ != nullptr)
+                    {
+                        for (double x = 490.0; x < 490.0 + 400.0; x += 4.0)
+                        {
+                            if (terrainField_->heightAt(x, 8050.0) >= 1.2)
+                            {
+                                shoreX = x;
+                                break;
+                            }
+                        }
+                        player_.position = {shoreX, 0.0, 8050.0};
+                        player_.position.y = terrainField_->heightAt(shoreX, 8050.0);
+                    } else
+                    {
+                        player_.position = {shoreX, 1.2, 8050.0};
+                    }
+                }
+            } else if (*scenarioName == "corpse_aftermath")
+            {
+                // A fresh corpse beside the player: the aftermath view.
+                const Position corpsePos{player_.position.x + 2.5,
+                    terrainField_ != nullptr ? terrainField_->heightAt(player_.position.x + 2.5, player_.position.z + 1.5)
+                                             : player_.position.y,
+                    player_.position.z + 1.5};
+                corpses_.stageDeath(static_cast<characterId>(999'901ull), corpsePos, clock_.worldTime, {}, 0);
+                corpses_.materializePending();
+            } else if (*scenarioName == "gi_room")
+            {
+                // rev 30 - the GI validation chamber scenario (the owner's
+                // "create a small room to test UE5's Lumen-like GI"). The
+                // chamber itself spawns through the bridge (setGiChamberSite
+                // below, drained on the bridge's first frame); this branch
+                // pins the SITE plan (x/z) and places the player inside. The
+                // ground height is filled in AFTER the terrain field exists
+                // (see the setGiChamberSite call below - at this point in
+                // start() the TerrainField is not built yet, and the first
+                // staging rendered the whole chamber sunk into the hill
+                // while the staged camera floated above it).
+                const double chamberX = genResult_.playerSpawn.x + 26.0;
+                const double chamberZ = genResult_.playerSpawn.z - 20.0;
+                gi_chamber_site_ = bridge::SceneBridge::GiChamberSite{chamberX, chamberZ, 0.0};
+                player_.position = {chamberX - 2.2, 0.0, chamberZ + 2.2};
+                // The room's single direct light is staged AFTER the ground
+                // height is known (same block as setGiChamberSite below).
+            } else if (*scenarioName == "character_lab")
+            {
+                // rev 34 - the character-customisation lab (the owner's
+                // architecture document, first implementation test). Same
+                // staging pattern as the chamber: the plan is pinned here,
+                // the ground height fills in AFTER the terrain field exists
+                // (the setCharacterLabSite call below). The two proof
+                // assemblies (the hybrid + its variant) spawn through the
+                // bridge on the first frame; the camera stands south of the
+                // pad at eye height, both figures framed.
+                const double labX = genResult_.playerSpawn.x + 30.0;
+                const double labZ = genResult_.playerSpawn.z;
+                character_lab_site_ = bridge::SceneBridge::GiChamberSite{labX, labZ, 0.0};
+                player_.position    = {labX, 0.0, labZ + 5.2};
+            }
+
+            // weather_kind: the staged kind pins the viewing region's weather
+            // (the rain/storm scenarios read their tint/fog from it).
+            if (const auto kind = context_->configurationIntegerInSection("harrowmere", "weather_kind");
+                kind.has_value())
+            {
+                if (world::Region *region = world_->region(world::regionIdAt(player_.position)); region != nullptr)
+                {
+                    region->weather.kind = static_cast<std::uint32_t>(*kind);
+                }
+            }
+        }
 
         // ---- the runtime capability: views snapshot this state; submit() queues --
         sim_.bindQueue(&intentQueue_);
@@ -1737,14 +2278,56 @@ public:
                 climatesVec[id] = region.climate;
         }
         terrainField_ = std::make_unique<bridge::TerrainField>(seed, climatesVec);
+        // Rev 25 (the drama round): the settlement pads. Every village/city
+        // territory carves a LEVEL, DRY pad into the raised relief before any
+        // consumer samples the heightfield (the terrain mesh, the scatter
+        // placements and the renderer's heightfield shadow grid all read the
+        // same shaped ground). The base height clamps above the sea level so
+        // a coastal village's pad never drowns under the water plane.
+        {
+            std::vector<bridge::TerrainField::SettlementFlat> flats;
+            for (const auto &[id, territory] : world_->territories())
+            {
+                if (territory.type == TerritoryType::KINGDOM || territory.type == TerritoryType::EMPIRE)
+                    continue;
+                const Position center = world::regionCenter(territory.region);
+                bridge::TerrainField::SettlementFlat flat;
+                flat.x          = center.x;
+                flat.z          = center.z;
+                flat.baseHeight = std::max(terrainField_->heightAt(center.x, center.z), SEA_LEVEL_M + 1.0);
+                flats.push_back(flat);
+            }
+            terrainField_->setSettlementFlats(std::move(flats));
+        }
 
         // Phase 5: build the scatter field (vegetation, rocks, settlement props).
         // D-IMG-2: scatter is data + seed. The ScatterField is built from the
         // same seed + climate grid + terrain field + scatter tables.
-        bridge::ScatterTables scatterTables;
-        if (bridge::loadScatterTables(std::filesystem::path(dataDirectory_), scatterTables))
+        // The tables are the field's non-owning view source: they live as a
+        // member of the mod (the field outlives start(), so a stack local
+        // would dangle - the crash the first placements() call exposed).
+        scatterTables_ = std::make_unique<bridge::ScatterTables>();
+        if (bridge::loadScatterTables(std::filesystem::path(dataDirectory_), *scatterTables_))
         {
-            scatterField_ = std::make_unique<bridge::ScatterField>(seed, climatesVec, *terrainField_, scatterTables);
+            scatterField_ = std::make_unique<bridge::ScatterField>(seed, climatesVec, *terrainField_, *scatterTables_);
+            // The settlement centers (the graphics-uplift round): every
+            // village/city territory seeds its A-150 footprint cluster. This
+            // must precede the field's first placements() call.
+            if (scatterField_ != nullptr)
+            {
+                std::vector<bridge::ScatterSettlementCenter> centers;
+                for (const auto &[id, territory] : world_->territories())
+                {
+                    if (territory.type == TerritoryType::KINGDOM || territory.type == TerritoryType::EMPIRE)
+                        continue;
+                    bridge::ScatterSettlementCenter c;
+                    c.position = world::regionCenter(territory.region);
+                    c.tierKey  = territory.type == TerritoryType::CITY ? "CITY" : "VILLAGE";
+                    c.seedMix  = static_cast<std::uint64_t>(id) * 0x9E3779B97F4A7C15ull;
+                    centers.push_back(c);
+                }
+                scatterField_->setSettlementCenters(std::move(centers));
+            }
         }
 
         // Phase 5: build the borders field (water + territory ribbons).
@@ -1778,6 +2361,93 @@ public:
         bridge_ = std::make_unique<bridge::SceneBridge>(
             *bridgeWorld_, *bridgeClock_, *bridgeSink_, storeCharacterView_.get(), terrainField_.get()
         );
+        // The graphics-uplift wiring: the scatter placements (settlements +
+        // vegetation) and the water plane state ride the same bridge.
+        bridge_->attachScatterField(scatterField_.get());
+        bridge_->attachBordersField(bordersField_.get());
+        // rev 34: the character-customisation wiring - the mod parses its
+        // parts library into the module (the kernel's demand closure pinned
+        // the module via mod.toml's capability demand), then hands the
+        // capability + the data directory to the bridge's lab.
+        if (character_customisation_ != nullptr)
+        {
+            std::string libraryError;
+            if (!bridge::loadCharacterLibrary(std::filesystem::path(dataDirectory_), character_customisation_, libraryError))
+            {
+                if (logging_ != nullptr)
+                {
+                    logging_->logMessage(engine::LogLevel::Error, "harrowmere_core: character parts library refused: " + libraryError);
+                }
+            }
+            bridge_->setCharacterLibrary(character_customisation_, std::filesystem::path(dataDirectory_));
+        }
+        // rev 30: the GI validation chamber site (the gi_room scenario's
+        // staging pinned the plan above; the ground height fills in HERE,
+        // where the TerrainField exists, then the point light is staged on
+        // the true ground). A run without the scenario leaves the zero site
+        // and nothing spawns.
+        if (gi_chamber_site_.x != 0.0 || gi_chamber_site_.z != 0.0)
+        {
+            const double chamberGround = terrainField_ != nullptr
+                                             ? terrainField_->heightAt(gi_chamber_site_.x, gi_chamber_site_.z)
+                                             : player_.position.y;
+            gi_chamber_site_.groundY = chamberGround;
+            player_.position.y       = chamberGround; // the player stands on the chamber floor
+            // The room's single direct light: warm, hung near the emissive
+            // ceiling panel. Staged HERE (where the ground height is final)
+            // through the LightingCapability the mod already probes. The
+            // staged scene file's [scene.point_lights] rows never reach the
+            // pbr module's configuration read (the --scene file feeds the
+            // scene registry, not the kernel configuration) - the lightless
+            // captures proved the config row path dead for staged scenes.
+            if (lighting_ != nullptr)
+            {
+                engine::PointLightDescription roomLight;
+                roomLight.position[0]  = static_cast<float>(gi_chamber_site_.x + 1.2);
+                roomLight.position[1]  = static_cast<float>(chamberGround + 2.9);
+                roomLight.position[2]  = static_cast<float>(gi_chamber_site_.z);
+                roomLight.color[0]     = 1.0f;
+                roomLight.color[1]     = 0.90f;
+                roomLight.color[2]     = 0.75f;
+                roomLight.intensity    = 2.5f;
+                roomLight.radius       = 0.0f;
+                lighting_->addPointLight(roomLight);
+            }
+        }
+        bridge_->setGiChamberSite(gi_chamber_site_);
+        // rev 34: the character lab's ground height fills in here too (the
+        // same after-terrain pattern the chamber site follows).
+        if (character_lab_site_.x != 0.0 || character_lab_site_.z != 0.0)
+        {
+            // The DRY-and-FLAT scan runs HERE (the staging branch precedes
+            // the TerrainField; the chamber's ground fill had the same
+            // ordering lesson). Walk +x until the terrain clears the sea
+            // datum by 2 m and stays level for the next 8 m - the first
+            // fixed-offset sites landed on the water margin twice.
+            if (terrainField_ != nullptr)
+            {
+                for (double x = character_lab_site_.x - 10.0; x < character_lab_site_.x + 300.0; x += 4.0)
+                {
+                    const double h = terrainField_->heightAt(x, character_lab_site_.z);
+                    bool flat = h >= SEA_LEVEL_M + 2.0;
+                    for (double d = 2.0; flat && d <= 8.0; d += 2.0)
+                    {
+                        flat = std::fabs(terrainField_->heightAt(x + d, character_lab_site_.z) - h) < 0.3;
+                    }
+                    if (flat)
+                    {
+                        character_lab_site_.x = x;
+                        break;
+                    }
+                }
+                character_lab_site_.groundY = terrainField_->heightAt(character_lab_site_.x, character_lab_site_.z);
+            } else
+            {
+                character_lab_site_.groundY = player_.position.y;
+            }
+            player_.position.y = character_lab_site_.groundY; // the staged eye rides the pad
+        }
+        bridge_->setCharacterLabSite(character_lab_site_);
 
         //        // Phase 5: publish scatter placements as scene objects. Each placement
         //        // becomes a box/sphere/cone primitive at the terrain height. The cap
@@ -2299,6 +2969,7 @@ private:
     engine::SceneCapability *scene_       = nullptr;
     engine::LightingCapability *lighting_ = nullptr;
     engine::EventBus *bus_                = nullptr;
+    engine::ComponentContext *context_    = nullptr; // start()'s staged-key reads
 
     data::GameConfig config_ = data::GameConfig::withValues(10, 60, 6, 0, "mods");
     std::vector<std::string> disabledModIds_;
@@ -2401,10 +3072,18 @@ private:
     std::unique_ptr<ClockBridgeView> bridgeClock_;
     std::unique_ptr<EngineSceneSink> bridgeSink_;
     std::unique_ptr<bridge::SceneBridge> bridge_;
+    // rev 34: the character-customisation capability + the lab scenario's
+    // staged site (the same after-terrain ground fill the chamber uses).
+    engine::CharacterCustomisationCapability *character_customisation_ = nullptr;
+    bridge::SceneBridge::GiChamberSite character_lab_site_{};
+    // The gi_room scenario's chamber site (set during the scenario staging
+    // pass, handed to the bridge once it exists).
+    bridge::SceneBridge::GiChamberSite gi_chamber_site_{};
     // Phase 5: the presentation fields (terrain, scatter, borders). Built once
     // from the worldgen seed + climate grid; the bridge consumes them.
     std::unique_ptr<bridge::TerrainField> terrainField_;
     std::unique_ptr<bridge::ScatterField> scatterField_;
+    std::unique_ptr<bridge::ScatterTables> scatterTables_; // the field's tables (owned; the field holds a view)
     std::unique_ptr<bridge::BordersField> bordersField_;
 
     engine::EventSubscription fixedUpdateSubscription_;

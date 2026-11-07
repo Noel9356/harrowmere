@@ -43,6 +43,7 @@ void RendererState::createPipelines()
     compositeSetLayout.reset();
     sceneDescriptorSet.reset();
     sceneDescriptorPool.reset();
+    sceneTransparentPipeline.reset();
     scenePipeline.reset();
     scenePipelineLayout.reset();
     sceneSetLayout.reset();
@@ -187,6 +188,40 @@ void RendererState::createScenePipeline()
 
         scenePipeline = std::make_unique<vk::raii::Pipeline>(*device, *pipelineCache, pipelineInfo);
 
+        // Rev 31 (the layered depth buffer): the transparency pass's pipeline.
+        // Same layout + vertex stage, its own fragment shader writing the
+        // layer's three attachments; depth test against the opaque depth with
+        // the write OFF; no blending (the composite owns the blend).
+        vk::raii::ShaderModule transFragmentModule
+            = createShaderModuleFromDevice(*device, resolvedShaderDirectory / "scene_transparent.frag.spv");
+        vk::PipelineShaderStageCreateInfo transFragmentStage;
+        transFragmentStage.setStage(vk::ShaderStageFlagBits::eFragment)
+            .setModule(*transFragmentModule)
+            .setPName("main");
+        const std::array<vk::PipelineShaderStageCreateInfo, 2> transStages = {vertexStage, transFragmentStage};
+
+        depthState.setDepthWriteEnable(false);
+        depthState.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
+        std::array<vk::Format, 3> transColorFormats = {gbufferAlbedoFormat, hdrColorFormat, vk::Format::eR32Sfloat};
+        renderingInfo.setColorAttachmentFormats(transColorFormats);
+        renderingInfo.setDepthAttachmentFormat(gbufferDepthFormat);
+
+        vk::GraphicsPipelineCreateInfo transPipelineInfo;
+        transPipelineInfo.setPNext(&renderingInfo);
+        transPipelineInfo.setStages(transStages);
+        transPipelineInfo.setPVertexInputState(&vertexInput);
+        transPipelineInfo.setPInputAssemblyState(&inputAssembly);
+        transPipelineInfo.setPViewportState(&viewportState);
+        transPipelineInfo.setPRasterizationState(&rasterization);
+        transPipelineInfo.setPMultisampleState(&multisampling);
+        transPipelineInfo.setPDepthStencilState(&depthState);
+        transPipelineInfo.setPColorBlendState(&colorBlend);
+        transPipelineInfo.setPDynamicState(&dynamicState);
+        transPipelineInfo.setLayout(**scenePipelineLayout);
+        transPipelineInfo.setRenderPass(nullptr);
+
+        sceneTransparentPipeline = std::make_unique<vk::raii::Pipeline>(*device, *pipelineCache, transPipelineInfo);
+
         vk::DescriptorPoolSize uniformPoolSize(vk::DescriptorType::eUniformBuffer, 1);
         vk::DescriptorPoolSize storagePoolSize(vk::DescriptorType::eStorageBuffer, 1);
         vk::DescriptorPoolSize arrayPoolSize(vk::DescriptorType::eCombinedImageSampler, 2);
@@ -196,47 +231,60 @@ void RendererState::createScenePipeline()
         poolInfo.setMaxSets(1);
         poolInfo.setPoolSizes(scenePoolSizes);
         sceneDescriptorPool = std::make_unique<vk::raii::DescriptorPool>(*device, poolInfo);
-        vk::DescriptorSetAllocateInfo setAllocate;
-        setAllocate.setDescriptorPool(**sceneDescriptorPool);
-        setAllocate.setSetLayouts(**sceneSetLayout);
-        sceneDescriptorSet = std::make_unique<vk::raii::DescriptorSet>(
-            std::move(vk::raii::DescriptorSets(*device, setAllocate).front())
-        );
-
-        vk::DescriptorBufferInfo cameraBufferInfo(**cameraBufferStorage.buffer, 0, sizeof(CameraData));
-        vk::DescriptorBufferInfo primitivesBufferInfo(**primitivesBuffer.buffer, 0, vk::WholeSize);
-        vk::DescriptorImageInfo albedoArrayInfo(
-            **textureSampler, *albedoArrayImage.view, vk::ImageLayout::eShaderReadOnlyOptimal
-        );
-        vk::DescriptorImageInfo dataArrayInfo(
-            **textureSampler, *dataArrayImage.view, vk::ImageLayout::eShaderReadOnlyOptimal
-        );
-        std::array<vk::WriteDescriptorSet, 4> sceneWrites;
-        sceneWrites[0].setDstSet(**sceneDescriptorSet);
-        sceneWrites[0].setDstBinding(sceneCameraBinding);
-        sceneWrites[0].setDescriptorType(vk::DescriptorType::eUniformBuffer);
-        sceneWrites[0].setBufferInfo(cameraBufferInfo);
-        sceneWrites[1].setDstSet(**sceneDescriptorSet);
-        sceneWrites[1].setDstBinding(scenePrimitivesBinding);
-        sceneWrites[1].setDescriptorType(vk::DescriptorType::eStorageBuffer);
-        sceneWrites[1].setBufferInfo(primitivesBufferInfo);
-        sceneWrites[2].setDstSet(**sceneDescriptorSet);
-        sceneWrites[2].setDstBinding(sceneAlbedoArrayBinding);
-        sceneWrites[2].setDescriptorType(vk::DescriptorType::eCombinedImageSampler);
-        sceneWrites[2].setImageInfo(albedoArrayInfo);
-        sceneWrites[3].setDstSet(**sceneDescriptorSet);
-        sceneWrites[3].setDstBinding(sceneDataArrayBinding);
-        sceneWrites[3].setDescriptorType(vk::DescriptorType::eCombinedImageSampler);
-        sceneWrites[3].setImageInfo(dataArrayInfo);
-        device->updateDescriptorSets(sceneWrites, {});
+        writeSceneDescriptors();
     }
+}
+
+void RendererState::writeSceneDescriptors()
+{
+    // The scene set's allocation + the four writes, factored out of
+    // createScenePipeline so rebuildSceneTextureArrays can re-bind new array
+    // views without touching the pipeline (the pool resets first - the set
+    // is freed with every other allocation, then re-allocated here).
+    vk::DescriptorSetAllocateInfo setAllocate;
+    setAllocate.setDescriptorPool(**sceneDescriptorPool);
+    setAllocate.setSetLayouts(**sceneSetLayout);
+    sceneDescriptorSet = std::make_unique<vk::raii::DescriptorSet>(
+        std::move(vk::raii::DescriptorSets(*device, setAllocate).front())
+    );
+
+    vk::DescriptorBufferInfo cameraBufferInfo(**cameraBufferStorage.buffer, 0, sizeof(CameraData));
+    vk::DescriptorBufferInfo primitivesBufferInfo(**primitivesBuffer.buffer, 0, vk::WholeSize);
+    vk::DescriptorImageInfo albedoArrayInfo(
+        **textureSampler, *albedoArrayImage.view, vk::ImageLayout::eShaderReadOnlyOptimal
+    );
+    vk::DescriptorImageInfo dataArrayInfo(
+        **textureSampler, *dataArrayImage.view, vk::ImageLayout::eShaderReadOnlyOptimal
+    );
+    std::array<vk::WriteDescriptorSet, 4> sceneWrites;
+    sceneWrites[0].setDstSet(**sceneDescriptorSet);
+    sceneWrites[0].setDstBinding(sceneCameraBinding);
+    sceneWrites[0].setDescriptorType(vk::DescriptorType::eUniformBuffer);
+    sceneWrites[0].setBufferInfo(cameraBufferInfo);
+    sceneWrites[1].setDstSet(**sceneDescriptorSet);
+    sceneWrites[1].setDstBinding(scenePrimitivesBinding);
+    sceneWrites[1].setDescriptorType(vk::DescriptorType::eStorageBuffer);
+    sceneWrites[1].setBufferInfo(primitivesBufferInfo);
+    sceneWrites[2].setDstSet(**sceneDescriptorSet);
+    sceneWrites[2].setDstBinding(sceneAlbedoArrayBinding);
+    sceneWrites[2].setDescriptorType(vk::DescriptorType::eCombinedImageSampler);
+    sceneWrites[2].setImageInfo(albedoArrayInfo);
+    sceneWrites[3].setDstSet(**sceneDescriptorSet);
+    sceneWrites[3].setDstBinding(sceneDataArrayBinding);
+    sceneWrites[3].setDescriptorType(vk::DescriptorType::eCombinedImageSampler);
+    sceneWrites[3].setImageInfo(dataArrayInfo);
+    device->updateDescriptorSets(sceneWrites, {});
 }
 
 void RendererState::createCompositePipeline()
 {
     // Composite pipeline: reads the lighting targets, writes the swapchain.
     {
-        std::array<vk::DescriptorSetLayoutBinding, compositeCameraBinding + 1> bindings;
+        // Rev 31: bindings 9..11 are the layered depth buffer's transparency
+        // layer (see renderer_state.hpp) - sampled images like 0..6, but
+        // beyond the environment/camera uniforms at 7/8, so they are declared
+        // explicitly instead of through the 0..count loop.
+        std::array<vk::DescriptorSetLayoutBinding, compositeTransDepthBinding + 1> bindings;
         for (std::uint32_t index = 0; index < compositeImageBindingCount; ++index)
         {
             bindings[index].setBinding(index);
@@ -254,6 +302,21 @@ void RendererState::createCompositePipeline()
             .setDescriptorType(vk::DescriptorType::eUniformBuffer)
             .setDescriptorCount(1);
         bindings[compositeCameraBinding].setStageFlags(vk::ShaderStageFlagBits::eFragment);
+        bindings[compositeTransAlbedoBinding]
+            .setBinding(compositeTransAlbedoBinding)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1);
+        bindings[compositeTransAlbedoBinding].setStageFlags(vk::ShaderStageFlagBits::eFragment);
+        bindings[compositeTransNormalBinding]
+            .setBinding(compositeTransNormalBinding)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1);
+        bindings[compositeTransNormalBinding].setStageFlags(vk::ShaderStageFlagBits::eFragment);
+        bindings[compositeTransDepthBinding]
+            .setBinding(compositeTransDepthBinding)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1);
+        bindings[compositeTransDepthBinding].setStageFlags(vk::ShaderStageFlagBits::eFragment);
         vk::DescriptorSetLayoutCreateInfo setInfo;
         setInfo.setBindings(bindings);
         compositeSetLayout = std::make_unique<vk::raii::DescriptorSetLayout>(*device, setInfo);
@@ -332,7 +395,10 @@ void RendererState::createCompositePipeline()
         }
 
         std::array<vk::DescriptorPoolSize, 2> compositePoolSizes{
-            vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, compositeImageBindingCount),
+            vk::DescriptorPoolSize(
+                vk::DescriptorType::eCombinedImageSampler,
+                compositeTransDepthBinding + 1 - 2 // image bindings 0..6 and 9..11 (the uniforms at 7/8 excluded)
+            ),
             vk::DescriptorPoolSize(
                 vk::DescriptorType::eUniformBuffer, compositeCameraBinding + 1 - compositeImageBindingCount
             )
@@ -668,5 +734,25 @@ void RendererState::writeCompositeDescriptors()
     writes[compositeCameraBinding].setDescriptorType(vk::DescriptorType::eUniformBuffer);
     writes[compositeCameraBinding].setBufferInfo(cameraInfo);
     device->updateDescriptorSets(writes, {});
+
+    // Rev 31 (the layered depth buffer): the transparency layer's three
+    // bindings (9..11), written separately - they sit past the uniforms in
+    // binding space. transDepth reads through the nearest sampler like the
+    // opaque depth (texel-exact; the composite branches on raw values).
+    std::array<vk::DescriptorImageInfo, 3> transImages;
+    transImages[0] = vk::DescriptorImageInfo(**linearSampler, *transAlbedoImage.view, vk::ImageLayout::eGeneral);
+    transImages[1] = vk::DescriptorImageInfo(**linearSampler, *transNormalImage.view, vk::ImageLayout::eGeneral);
+    transImages[2] = vk::DescriptorImageInfo(**nearestSampler, *transDepthImage.view, vk::ImageLayout::eGeneral);
+    const std::uint32_t transBindings[3]
+        = {compositeTransAlbedoBinding, compositeTransNormalBinding, compositeTransDepthBinding};
+    std::array<vk::WriteDescriptorSet, 3> transWrites;
+    for (std::uint32_t index = 0; index < 3; ++index)
+    {
+        transWrites[index].setDstSet(**compositeDescriptorSet);
+        transWrites[index].setDstBinding(transBindings[index]);
+        transWrites[index].setDescriptorType(vk::DescriptorType::eCombinedImageSampler);
+        transWrites[index].setImageInfo(transImages[index]);
+    }
+    device->updateDescriptorSets(transWrites, {});
 }
 } // namespace engine

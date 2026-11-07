@@ -2,7 +2,9 @@
 
 Task 5.1.1 deliverable. The plan's image work gets the same contract the sim has: a pinned, repeatable set of captures with a pass/fail report, and a frame budget the whole phase is accountable to.
 
-This document is the **regression contract**: the eight scenarios the suite runs, the checklist a reviewer must confirm in each scenario's PNG, and the budget row each scenario is measured against. A changed image is legal only with a changed expectation line in this document.
+This document is the **regression contract**: the nine scenarios the suite runs, the checklist a reviewer must confirm in each scenario's PNG, and the budget row each scenario is measured against. A changed image is legal only with a changed expectation line in this document.
+
+Rev-27 staging note: the uplift rounds (rev 24-27) restaged several scenarios' hour and camera so the frames actually show what the round changed - the table below pins the CURRENT staging (the app's `resolveCaptureScenario` plus the rig's per-scenario scene file carry these values); the original 2026-11-04 table's times live in the rev-23 plan text.
 
 ## Running the suite
 
@@ -20,20 +22,22 @@ This document is the **regression contract**: the eight scenarios the suite runs
 
 The suite's seed is pinned at `CAPTURE_SUITE_SEED = 20261103` (the same anchor the November evidence runs established). Every scenario uses this seed so the regression contract compares like-for-like.
 
-## The eight scenarios
+## The nine scenarios
 
 Each scenario is a named setup (seed, time of day, weather, camera pose, panels open) executed in a finite run (`quit_after_seconds` as a TOML float per DEVIATIONS.md 2026-10-29), producing PNGs into `<output-dir>/<scenario-name>/`.
 
 | # | Name | Time of day | Weather | Panels | Camera target | Budget gate |
 |---|---|---|---|---|---|---|
-| 1 | `spawn_day` | 10:00 (A-129) | clear | no | world center (8 km, 8 km) | measured |
-| 2 | `spawn_night` | 02:00 | clear | no | world center | measured |
-| 3 | `walk_village` | 12:00 | clear | no | village (7.5 km, 7.5 km) | **gated (A-146)** |
-| 4 | `walk_frontier` | 14:00 | clear | no | frontier (15 km, 15 km) | measured |
-| 5 | `coast` | 11:00 | clear | no | west coast (0.5 km, 8 km) | **gated (A-146)** |
+| 1 | `spawn_day` | 09:00 | clear | no | composed aerial over the spawn village | measured |
+| 2 | `spawn_night` | 02:00 | clear | no | composed aerial over the spawn village | measured |
+| 3 | `walk_village` | 08:30 | clear | no | street level on the village's north street | **gated (A-146)** |
+| 4 | `walk_frontier` | 16:30 | clear | no | lowered onto the settlement approach, facing the sun | measured |
+| 5 | `coast` | 15:45 | clear | no | the east shore looking west across the basin | **gated (A-146)** |
 | 6 | `rain` | 13:00 | rain | no | world center | **gated (A-146)** |
-| 7 | `panels_open` | 10:00 | clear | yes | world center | measured |
+| 7 | `panels_open` | 09:15 | clear | yes | world center | measured |
 | 8 | `corpse_aftermath` | 18:00 (dusk) | clear | no | spawn village | measured |
+| 9 | `crowd_street` | 14:48 (rev 27; was 15:36) | clear | no | the market square's east edge at eye height, the well-side crowd 8-13 m out | measured |
+| 10 | `gi_room` | 10:00 (irrelevant: the sealed chamber admits no sun) | clear | no | inside the GI validation chamber against the east wall at eye height, looking west across the pedestal to the red/green end walls (rev 30; the temporal GI converges across the 180 s window) | measured |
 
 The three **gated** scenarios are the 5.3.1 image-budget gate's anchors: the heaviest scenes the budget gate asserts against A-146. The other five are measured (their percentiles appear in the report) but not gated — a measured scenario exceeding the budget is a regression signal, not a gate failure.
 
@@ -89,6 +93,12 @@ Each scenario's checklist is a list of observable features a reviewer must confi
 - [ ] Loot is interactable (if within INTERACT_RANGE_M) — *1.7.1 A-121*
 - [ ] No living NPC at the corpse's position — *2.5.3*
 
+### `crowd_street` (rev 26; restaged rev 27)
+- [ ] The blocky crowd reads as INDIVIDUALS (per-part randomized look: tunic / trousers / skin tones / hair caps, two baked builds) — *A-199*
+- [ ] The packed-dirt plaza reads as packed earth, not mud and not sand (A-204 geometric-normal shading, A-205 CC0 dirt set) — *5.4.2*
+- [ ] Every villager casts a sun shadow (the analytic plaza's own tops lit) — *A-204*
+- [ ] Well, market stalls and the cottage ring frame the square — *A-192/A-198*
+
 ## The budget
 
 The pinned budget is **A-146: 16.6 ms render-side on the reference machine at 1080p** (a 60 Hz frame). The suite records frame-time percentiles (p50/p95) per scenario; the 5.3.1 gate asserts the three gated scenarios' p95 against A-146.
@@ -103,6 +113,7 @@ The pinned budget is **A-146: 16.6 ms render-side on the reference machine at 10
 | `rain` | ≤ 9.96 ms | **≤ 16.6 ms** | **gated** |
 | `panels_open` | ≤ 9.96 ms | ≤ 16.6 ms | measured |
 | `corpse_aftermath` | ≤ 9.96 ms | ≤ 16.6 ms | measured |
+| `crowd_street` | ≤ 9.96 ms | ≤ 16.6 ms | measured |
 
 The p50 target is 60% of A-146 (headroom: the median frame should be well under the gate; only the p95 tail is gated). The reference machine is the §4.5 anchor (2018-mid-range 6-core desktop, Core i5-8400 / Ryzen 5 2600 class, 16 GB RAM, SATA-class SSD; release build, no debugger attached).
 

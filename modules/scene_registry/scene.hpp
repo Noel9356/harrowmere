@@ -82,6 +82,20 @@ public:
     MeshHandle meshHandle(const std::string &name) const override;
     std::string meshName(MeshHandle handle) const override;
 
+    // The runtime environment override (the mod-driven sky/fog/exposure/moon
+    // state). setEnvironment stores the state and bumps environmentSequence_
+    // ONLY when the pushed state differs from the stored one - the integer
+    // compare the renderer's skip-identical-frames path keys on.
+    void setEnvironment(const SceneEnvironmentOverride &environment) override;
+    SceneEnvironmentOverride environment() const override
+    {
+        return environmentState_;
+    }
+    std::uint32_t environmentSequence() const override
+    {
+        return environmentSequence_;
+    }
+
 private:
     struct RegistryEntry
     {
@@ -200,6 +214,13 @@ private:
     // The configured live-object capacity ([scene] max_objects, clamped to
     // [1, gpuMaxObjects]); read once at construct. Default: defaultMaxObjects.
     std::uint32_t configuredObjectCapacity = defaultMaxObjects;
+
+    // The runtime environment override state + its change sequence. A push
+    // that equals the stored state is a no-op (the sequence stays put), so a
+    // mod that re-pushes the same atmosphere every frame costs nothing on
+    // the renderer side.
+    SceneEnvironmentOverride environmentState_;
+    std::uint32_t environmentSequence_ = 0;
 
     // Registered meshes keyed by handle, plus the name index (name -> handle)
     // that makes imports idempotent: registering the same name again returns

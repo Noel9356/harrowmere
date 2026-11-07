@@ -25,9 +25,12 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "bridge/scene_bridge.hpp"
+#include "core/constants_phase5.hpp" // MOON_IRRADIANCE (the rev-22 night key light)
+#include "bridge/character_look.hpp" // CHARACTER_TUNIC_DYES (the rev-24 randomized look)
 
 using namespace harrowmere::bridge;
 
@@ -73,6 +76,27 @@ public:
     {
         // P1 never moves territory markers; this is a no-op in tests.
         ++position_writes_;
+    }
+
+    // rev 26: the pose path (the blocky body rides it) - counted like the
+    // position writes, with the yaw recorded for the facing pin.
+    void setObjectPose(
+        Handle /*h*/, const Position & /*p*/, float yaw
+    ) override
+    {
+        ++position_writes_;
+        pose_yaws_.push_back(yaw);
+    }
+
+    Handle spawnPropMeshInstance(
+        const char *name, const Position &center, float yaw,
+        const std::array<float, 3> &tint, const char *textureSet, float /*uvScale*/
+    ) override
+    {
+        const Handle h = next_handle_++;
+        meshes_.push_back({name, center, yaw, tint, textureSet});
+        mesh_handles_.push_back(h);
+        return h;
     }
 
     void setSunLight(
@@ -157,6 +181,19 @@ public:
     std::vector<Handle> disc_handles_;
     std::vector<SunCall> sun_calls_;
     std::vector<std::array<float, 3>> sky_calls_;
+
+    // rev 26 tracking (the blocky near body).
+    struct MeshCall
+    {
+        std::string name;
+        Position center;
+        float yaw;
+        std::array<float, 3> tint;
+        std::string set;
+    };
+    std::vector<MeshCall> meshes_;
+    std::vector<Handle> mesh_handles_;
+    std::vector<float> pose_yaws_;
 
 private:
     Handle next_handle_ = 1; // 0 is NULL_HANDLE
@@ -301,11 +338,14 @@ TEST_CASE(
     CHECK(sink.sun_calls_.back().intensity > 0.0f);
     CHECK(sink.sun_calls_.back().intensity < 1.0f);
 
-    // Midnight -> intensity 0.
+    // Midnight -> the moon rides the sun channel (rev 22): the directional
+    // light never goes dark now - at night it is the cool moon key light
+    // (MOON_DIRECTION, MOON_IRRADIANCE), so surfaces stay readable.
     clock.setDayPhase01(0.0);
     bridge.onFrame();
     CHECK(sink.sun_calls_.size() == 3);
-    CHECK(sink.sun_calls_.back().intensity == doctest::Approx(0.0f).epsilon(0.001f));
+    CHECK(sink.sun_calls_.back().intensity == doctest::Approx(harrowmere::MOON_IRRADIANCE).epsilon(0.001f));
+    CHECK(sink.sun_calls_.back().direction[1] < 0.0f); // light still traveling downward
 
     // Wraparound: a tiny step across the midnight seam (0.999 -> 0.002) is
     // also small (wrapped distance 0.003) and must NOT trigger an update.
@@ -470,7 +510,10 @@ TEST_CASE(
     FakeClock clock;
     FakeSink sink;
     FakeCharacters characters;
-    characters.add(1, 5.0, 5.0, kTierNear, /*moving=*/true);
+    // Rev 26: the near-body positions sit BEYOND the blocky detail radius
+    // (42 m of the anchor) so this pin keeps testing the sphere LOD it was
+    // written for; TestBridge_BlockyNearBody owns the detail radius itself.
+    characters.add(1, 60.0, 5.0, kTierNear, /*moving=*/true);
     characters.add(2, 100.0, 100.0, kTierMid, /*moving=*/false);
     characters.add(3, -80.0, -80.0, kTierMid, /*moving=*/true, /*species=*/4, /*faction=*/2);
     // A corpse in the window (the victim's death position).
@@ -487,21 +530,32 @@ TEST_CASE(
     }
     bridge.onFrame(); // settle
 
-    // One object per present character (3 spheres), one per corpse (1 box).
+    // One body per present character (3) plus its A-188 head (3), one corpse
+    // box per corpse (1). (Rev-21 amendment: the presence silhouette is the
+    // A-188 body+head composition - the head is a second sphere.)
     CHECK(bridge.characterObjectCount() == 3);
     CHECK(bridge.corpseObjectCount() == 1);
-    CHECK(sink.spheres_.size() == 3);
+    CHECK(sink.spheres_.size() == 6); // 3 bodies + 3 A-188 heads
     CHECK(sink.rings_.size() == 1); // only the factioned character (id 3) carries a ring
     CHECK(bridge.characterObjectKind(1) == 1);
     CHECK(bridge.characterObjectKind(2) == 1);
     CHECK(bridge.characterObjectKind(3) == 1);
 
-    // Sphere geometry: radius 0.8, resting on the ground plane (center y = r).
+    // Sphere geometry: the per-character randomized look (rev 24) jitters
+    // the radius inside the girth band (0.90..1.12 of the base) and rests
+    // the body on the ground plane (center y = its own radius). The tint is
+    // a tunic dye from the look palette, NOT the species row (the species
+    // read moved to the jittered head tone).
     REQUIRE(sink.spheres_.size() >= 2);
-    CHECK(sink.spheres_[0].radius == doctest::Approx(CHARACTER_SPHERE_RADIUS));
-    CHECK(sink.spheres_[0].center.y == doctest::Approx(CHARACTER_SPHERE_RADIUS));
-    // Species color table lookup: id 1's row is the human tint.
-    CHECK(sink.spheres_[0].tint[0] == doctest::Approx(SPECIES_COLORS[1].color[0]));
+    CHECK(sink.spheres_[0].radius > doctest::Approx(CHARACTER_SPHERE_RADIUS * 0.89f));
+    CHECK(sink.spheres_[0].radius < doctest::Approx(CHARACTER_SPHERE_RADIUS * 1.13f));
+    CHECK(sink.spheres_[0].center.y == doctest::Approx(sink.spheres_[0].radius));
+    const bool dyeMatch = std::any_of(harrowmere::bridge::CHARACTER_TUNIC_DYES.begin(),
+        harrowmere::bridge::CHARACTER_TUNIC_DYES.end(), [&](const std::array<float, 3> &dye) {
+            return dye[0] == sink.spheres_[0].tint[0] && dye[1] == sink.spheres_[0].tint[1]
+                && dye[2] == sink.spheres_[0].tint[2];
+        });
+    CHECK(dyeMatch); // the body wears one of the tunic dyes
 
     // Corpses flatten gray: half-Y 0.1, TINT_CORPSE.
     REQUIRE(sink.boxes_.size() == 1);
@@ -519,11 +573,11 @@ TEST_CASE(
     CHECK(bridge.pendingCharacterCreationCount() == 0);
 
     // Position sync is batched per frame: every live character body moves
-    // once per frame (the ring rides with it when present).
+    // once per frame, its A-188 head with it (the ring rides when present).
     const std::uint32_t writesBefore = sink.position_writes_;
-    characters.chars[0].position     = Position{7.0, 0.0, 7.0}; // id 1 walked
+    characters.chars[0].position     = Position{75.0, 0.0, 5.0}; // id 1 walked (stays outside the detail radius)
     bridge.onFrame();
-    CHECK(sink.position_writes_ == writesBefore + 3 + 1); // 3 bodies + the 1 ring
+    CHECK(sink.position_writes_ == writesBefore + 3 + 3 + 1); // 3 bodies + 3 heads + the 1 ring
 
     // Walking out of the presentation radius despawns (handle removed).
     characters.chars[1].position = Position{10000.0, 0.0, 0.0}; // 10 km away
@@ -582,8 +636,11 @@ TEST_CASE(
     bridge.onFrame();
     CHECK(bridge.characterObjectCount() == 0);
 
-    // A FAR character that IS moving shows the 0.6^3 marker box (not a
-    // sphere): the transient "FAR-movement marker".
+    // A FAR character that IS moving shows the marker box (not a sphere):
+    // the transient "FAR-movement marker". Rev 24: the marker wears the
+    // character's tunic dye at a jittered size, so the box's half extent
+    // rides inside the girth band (0.8..1.3 of the base) instead of the
+    // single shared extent.
     characters.add(13, 250.0, 0.0, kTierFar, /*moving=*/true);
     bridge.onFrame();
     while (bridge.pendingCharacterCreationCount() > 0)
@@ -593,8 +650,15 @@ TEST_CASE(
     CHECK(bridge.characterObjectCount() == 1);
     CHECK(bridge.characterObjectKind(13) == 2);
     REQUIRE(sink.boxes_.size() == 1);
-    CHECK(sink.boxes_[0].halfWidth == doctest::Approx(FAR_MARKER_BOX_HALF_EXTENT));
-    CHECK(sink.boxes_[0].height == doctest::Approx(FAR_MARKER_BOX_HALF_EXTENT * 2.0f));
+    CHECK(sink.boxes_[0].halfWidth > doctest::Approx(FAR_MARKER_BOX_HALF_EXTENT * 0.79f));
+    CHECK(sink.boxes_[0].halfWidth < doctest::Approx(FAR_MARKER_BOX_HALF_EXTENT * 1.31f));
+    CHECK(sink.boxes_[0].height == doctest::Approx(sink.boxes_[0].halfWidth * 2.0f));
+    const bool farDyeMatch = std::any_of(harrowmere::bridge::CHARACTER_TUNIC_DYES.begin(),
+        harrowmere::bridge::CHARACTER_TUNIC_DYES.end(), [&](const std::array<float, 3> &dye) {
+            return dye[0] == sink.boxes_[0].tint[0] && dye[1] == sink.boxes_[0].tint[1]
+                && dye[2] == sink.boxes_[0].tint[2];
+        });
+    CHECK(farDyeMatch); // the marker wears a tunic dye, not the shared grey
 
     // The mover stops -> the marker despawns (back to statistical rest).
     characters.chars.back().moving = false;
@@ -630,20 +694,179 @@ TEST_CASE(
     FakeCharacters characters;
     for (characterId i = 1; i <= 100; ++i)
     {
-        characters.add(i, static_cast<double>(i), 0.0, kTierMid, /*moving=*/false);
+        // Rev 26: beyond the 42 m blocky detail radius (and inside the 300 m
+        // presentation window) - this pin prices the SPHERE LOD's chunk.
+        characters.add(i, 150.0 + static_cast<double>(i), 0.0, kTierMid, /*moving=*/false);
     }
 
     SceneBridge bridge(world, clock, sink, &characters);
     bridge.onFrame();
-    CHECK(sink.spheres_.size() <= SCENE_CREATE_CHUNK_PER_FRAME);
+    // The A-119 chunk counts TASKS (one per character); each task spawns the
+    // A-188 body + head pair, so the sphere count per frame is 2x the budget.
+    CHECK(sink.spheres_.size() <= 2 * SCENE_CREATE_CHUNK_PER_FRAME);
 
     std::size_t previous = sink.spheres_.size();
     while (bridge.pendingCharacterCreationCount() > 0)
     {
         bridge.onFrame();
         const std::size_t now = sink.spheres_.size();
-        CHECK(now - previous <= SCENE_CREATE_CHUNK_PER_FRAME);
+        CHECK(now - previous <= 2 * SCENE_CREATE_CHUNK_PER_FRAME);
         previous = now;
     }
-    CHECK(sink.spheres_.size() == 100);
+    CHECK(sink.spheres_.size() == 200); // 100 bodies + 100 heads (A-188)
+}
+
+// ---------------------------------------------------------------------------
+// TestBridge_BlockyNearBody (rev 26, the crowd round - pinned name; rev 28
+// renames the read to the organic body but keeps the scenario)
+//
+// A NEAR/MID character within CHARACTER_DETAIL_RADIUS_M of the LOD anchor
+// presents as the procedural rounded humanoid: four mesh instances
+// (body / legs / head / hair - the per-part randomized look). Crossing the
+// detail radius outward re-creates the character as the kind-1 sphere + head
+// LOD; crossing back restores the organic body. The pose path carries the
+// yaw (the facing pin).
+// ---------------------------------------------------------------------------
+TEST_CASE(
+    "TestBridge_BlockyNearBody"
+)
+{
+    FakeWorld world;
+    FakeClock clock;
+    FakeSink sink;
+    FakeCharacters characters;
+    characters.add(20, 10.0, 10.0, kTierNear, /*moving=*/false); // 14.1 m of the anchor
+
+    SceneBridge bridge(world, clock, sink, &characters);
+    bridge.onFrame();
+    while (bridge.pendingCharacterCreationCount() > 0)
+    {
+        bridge.onFrame();
+    }
+    bridge.onFrame(); // settle
+
+    CHECK(bridge.characterObjectCount() == 1);
+    CHECK(bridge.characterObjectKind(20) == 3);
+
+    // The four organic part meshes spawned, named npc_*, tinted from the
+    // look's per-part dyes (rev 28: the hair is a mesh too - the analytic
+    // box read as a brick on the rounded heads).
+    REQUIRE(sink.meshes_.size() == 4);
+    bool bodyFound = false;
+    bool legsFound = false;
+    bool headFound = false;
+    bool hairFound = false;
+    std::array<float, 3> bodyTint{};
+    std::array<float, 3> legsTint{};
+    std::array<float, 3> hairTint{};
+    for (const auto &m : sink.meshes_)
+    {
+        if (m.name.rfind("npc_body_", 0) == 0)
+        {
+            bodyFound = true;
+            bodyTint  = m.tint;
+        }
+        if (m.name.rfind("npc_legs_", 0) == 0)
+        {
+            legsFound = true;
+            legsTint  = m.tint;
+        }
+        if (m.name.rfind("npc_head_", 0) == 0)
+        {
+            headFound = true;
+        }
+        if (m.name.rfind("npc_hair_", 0) == 0)
+        {
+            hairFound = true;
+            hairTint  = m.tint;
+        }
+    }
+    CHECK(bodyFound);
+    CHECK(legsFound);
+    CHECK(headFound);
+    CHECK(hairFound);
+    const bool bodyDye = std::any_of(harrowmere::bridge::CHARACTER_TUNIC_DYES.begin(),
+        harrowmere::bridge::CHARACTER_TUNIC_DYES.end(), [&](const std::array<float, 3> &dye) {
+            // rev 26: the parts render the RAW dye (no texture set - the
+            // flat fallback skips the A-189 pastel mix).
+            return dye[0] == bodyTint[0] && dye[1] == bodyTint[1] && dye[2] == bodyTint[2];
+        });
+    CHECK(bodyDye); // the torso wears one of the tunic dyes
+    const bool legsDye = std::any_of(harrowmere::bridge::CHARACTER_PANTS_DYES.begin(),
+        harrowmere::bridge::CHARACTER_PANTS_DYES.end(), [&](const std::array<float, 3> &dye) {
+            return dye[0] == legsTint[0] && dye[1] == legsTint[1] && dye[2] == legsTint[2];
+        });
+    CHECK(legsDye); // the legs wear one of the trouser dyes
+    const bool hairDye = std::any_of(harrowmere::bridge::CHARACTER_HAIR_TONES.begin(),
+        harrowmere::bridge::CHARACTER_HAIR_TONES.end(), [&](const std::array<float, 3> &t) {
+            return t[0] == hairTint[0] && t[1] == hairTint[1] && t[2] == hairTint[2];
+        });
+    CHECK(hairDye); // the hair cap wears one of the hair tones
+
+    // The pose path carried a yaw (the facing read, not a hard 0).
+    REQUIRE_FALSE(sink.pose_yaws_.empty());
+
+    // Crossing OUT of the detail radius re-creates as the sphere LOD.
+    characters.chars[0].position = Position{100.0, 0.0, 100.0};
+    bridge.onFrame();
+    while (bridge.pendingCharacterCreationCount() > 0)
+    {
+        bridge.onFrame();
+    }
+    CHECK(bridge.characterObjectKind(20) == 1);
+    CHECK(sink.spheres_.size() == 2); // the sphere body + the A-188 head
+    CHECK_FALSE(sink.removed_.empty()); // the blocky parts went back
+
+    // ...and crossing back restores the organic body.
+    characters.chars[0].position = Position{12.0, 0.0, 8.0};
+    bridge.onFrame();
+    while (bridge.pendingCharacterCreationCount() > 0)
+    {
+        bridge.onFrame();
+    }
+    CHECK(bridge.characterObjectKind(20) == 3);
+    CHECK(sink.meshes_.size() == 8); // four more part meshes (rev 28: + hair)
+}
+
+// ---------------------------------------------------------------------------
+// TestBridge_GaitPoseBucket (rev 27, the walk-gait round - pinned name)
+//
+// The bucket derivation is pure (D-IMG-2): a frame with no movement wears
+// the rest pose (0); a moving frame alternates walk A (1) / walk B (2) on
+// the A-154 bob phase - one stride pose per bob half-cycle, i.e. one swap
+// per 0.909 m step at the A-57 reference walk. The same traveled distance
+// wears the same pose every session.
+// ---------------------------------------------------------------------------
+TEST_CASE(
+    "TestBridge_GaitPoseBucket"
+)
+{
+    // Stationary frames: the rest pose regardless of accumulated travel.
+    CHECK(gaitPoseBucket(0.0, false) == 0);
+    CHECK(gaitPoseBucket(100.0, false) == 0);
+
+    // The bob's half-cycle in metres: NPC_GAIT_REFERENCE_SPEED_MPS / HZ.
+    const double halfCycle = NPC_GAIT_REFERENCE_SPEED_MPS / harrowmere::WALK_BOB_HZ;
+    const double eps       = 1e-9;
+
+    // The walk starts in pose A and flips to B exactly at the half-cycle
+    // boundary (the off-boundary samples keep the float comparisons clear
+    // of the exact flip point).
+    CHECK(gaitPoseBucket(0.0, true) == 1);
+    CHECK(gaitPoseBucket(halfCycle * 0.25, true) == 1);
+    CHECK(gaitPoseBucket(halfCycle * 0.5 - eps, true) == 1);
+    CHECK(gaitPoseBucket(halfCycle * 0.5 + eps, true) == 2);
+    CHECK(gaitPoseBucket(halfCycle - eps, true) == 2);
+    // A full bob cycle (one stride, two steps) returns to pose A.
+    CHECK(gaitPoseBucket(halfCycle + eps, true) == 1);
+    CHECK(gaitPoseBucket(halfCycle * 1.5 + eps, true) == 2);
+    CHECK(gaitPoseBucket(halfCycle * 2.0 + eps, true) == 1);
+
+    // Determinism: the same inputs, the same pose (D-IMG-2's no-stream rule
+    // read on the bucket itself).
+    for (int i = 1; i <= 16; ++i)
+    {
+        const double traveled = halfCycle * 0.137 * i;
+        CHECK(gaitPoseBucket(traveled, true) == gaitPoseBucket(traveled, true));
+    }
 }

@@ -83,6 +83,24 @@
 namespace harrowmere::bridge
 {
 
+// rev 24: the heightfield's floor, BELOW the A-151 datum (0 m). The old
+// clamp at exactly 0 flattened every natural basin to the datum, and with
+// the water plane sunk below the datum the whole 16 km patch rendered zero
+// visible water. The floor lets the noise's basins hold real lakes: the
+// A-151 water plane (datum - 0.3 m) surfaces wherever the ground falls
+// below it.
+inline constexpr double TERRAIN_BASIN_FLOOR_M = -2.5;
+
+// Rev 25 (the drama round): the settlement pad radii. Inside the FLAT radius
+// the ground is exactly the pad's base height; the BLEND radius (smoothstep)
+// hands back to the field. 26 m covers a CITY footprint ring (footprints
+// reach ~30 m) plus the market square; 92 m keeps the blend gentle enough
+// that the houses' 1.2 m-per-3 m ledge test passes at the pad's rim.
+inline constexpr double TERRAIN_SETTLEMENT_FLAT_RADIUS_M   = 26.0;
+inline constexpr double TERRAIN_SETTLEMENT_BLEND_RADIUS_M  = 92.0;
+inline constexpr double TERRAIN_SETTLEMENT_BLEND_R2_M      = TERRAIN_SETTLEMENT_BLEND_RADIUS_M
+                                                           * TERRAIN_SETTLEMENT_BLEND_RADIUS_M;
+
 // The heightfield for one world. Constructed from the worldgen seed and the
 // region climate grid (the inputs 1.6.1 already produced); immutable
 // thereafter. heightAt() is the ONE read door — everything else (camera floor,
@@ -159,6 +177,37 @@ public:
         return region_climates_;
     }
 
+    // ---- rev 25 (the drama round): settlement flats ------------------------
+    //
+    // The "scene is boring" verdict named the dead-flat plain AND the
+    // cottages sitting on whatever slope the noise drew under them. The
+    // rev-25 relief raises the noise amplitude (the per-climate caps below),
+    // and every settlement carves a LEVEL pad into that relief: inside the
+    // flat radius the ground is exactly the settlement's base height, then a
+    // smoothstep band hands back to the untouched field. HeightAt applies
+    // the blend LAST so every consumer (mesh grid, scatter placements,
+    // character grounding, the heightfield shadow grid the renderer builds
+    // from that mesh) sees the same shaped ground.
+    struct SettlementFlat
+    {
+        double x = 0.0;
+        double z = 0.0;
+        double baseHeight = 0.0; // the pad's level (metres above the datum)
+    };
+
+    // MUST be called after construction and before the first heightAt() the
+    // mesh/scatter paths make (the flats are pure data - set them once).
+    // Empty by default: the synthetic-field tests keep their exact values.
+    void setSettlementFlats(std::vector<SettlementFlat> flats) noexcept
+    {
+        settlement_flats_ = std::move(flats);
+    }
+
+    const std::vector<SettlementFlat> &settlementFlats() const noexcept
+    {
+        return settlement_flats_;
+    }
+
     // The precomputed coastal-distance LUT: per region, the distance in
     // metres to the nearest COASTAL region center (0 for coastal regions
     // themselves; large for inland regions with no coast). Used by the
@@ -213,6 +262,10 @@ private:
     // Build the coastal-distance LUT from the climate grid (one pass at
     // construction; heightAt reuses it).
     void buildCoastalDistanceLut();
+
+    // The settlement pads (rev 25, see the public record above). Empty until
+    // setSettlementFlats; heightAt blends towards each pad's base height.
+    std::vector<SettlementFlat> settlement_flats_;
 
     // The seed value (NOT a SeedRng stream — D-IMG-1).
     std::uint64_t seed_ = 0;

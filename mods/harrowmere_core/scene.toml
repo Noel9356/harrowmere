@@ -7,15 +7,20 @@
 # through the scene bridge (task 7.2) driving the scene capability at runtime.
 # This package is the run's only scene claimant (the one-world rule).
 [scene]
-max_objects = 128
+max_objects = 1024
 # Natural daytime sky: warm horizon blue, not flat navy.
 sky_radiance = [0.52, 0.62, 0.78]
 
 [scene.camera]
-# Camera looking down at ~30° — enough terrain to fill the frame, enough
-# sky for context. Positioned to avoid the horizon gap.
-position = [5600.0, 50.0, 6700.0]
-look_at = [5800.0, 0.0, 6500.0]
+# Rev 26: the camera anchors on the CAPTURE-SEED spawn village (the
+# [player-spawn] dump under --capture-scenario: the village center is
+# (5632,6656), the plaza ground 10.9 m). ~90 m three-quarter aerial from the
+# south-east: the square, its market stalls, the tower and the blocky crowd
+# fill the frame (the rev-26 first staging at 26 m still read as a clump -
+# 15 m over the pad puts the rooftops at eye level and the square fills
+# the lower third).
+position = [5694.0, 15.0, 6698.0]
+look_at = [5636.0, 11.5, 6658.0]
 far = 20000.0
 
 [scene.sun]
@@ -25,10 +30,17 @@ direction = [-0.3, -0.9, -0.3]
 color = [1.0, 0.97, 0.90]
 intensity = 5.0
 
-# Ground plane at y=0 (same level as terrain datum) — fills all gaps
-# between terrain mesh triangles. Green to match grass terrain.
-[[scene.objects]]
-type = "plane"
-position = [0.0, 0.0, 0.0]
-size = [16384.0, 0.01, 16384.0]
-albedo = [0.15, 0.28, 0.10]
+[scene.sky]
+# Rev 26: the stylized disk size - the physical 0.6 default drew a ~10 px
+# dot at 960 px that vanished in every wide frame (the "empty sky" coast);
+# 2.6 degrees reads as a stylized low-poly sun without washing the gradient.
+# The disk's DIRECTION now tracks the live sun (the renderer's environment
+# override); this section only seeds the static fallback.
+sun_disk_size_degrees = 2.6
+
+# The ground owns NO static plane any more (the graphics-uplift round): the
+# probe capture with the plane repainted pure red showed it contributes zero
+# pixels - the terrain mesh covers it everywhere the camera can see - and a
+# flat albedo lid at the datum fights the textured relief for the look. The
+# terrain mesh (the bridge, textured "grass") and the A-151 water plane own
+# the ground now.

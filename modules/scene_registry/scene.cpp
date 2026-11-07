@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <sol/sol.hpp>
 #include <stdexcept>
@@ -348,6 +350,17 @@ SceneCapability::ObjectHandle SceneModule::addObject(
                 + std::to_string(registry.size()) + " live)"
         );
     }
+    if (std::getenv("HARROWMERE_DUMP_SCENE") != nullptr)
+    {
+        // rev 23 diagnosis hook: HARROWMERE_DUMP_SCENE=1 prints one line per
+        // registered object (type, world position, size, texture set). The
+        // coast capture's floating slabs needed the actual scene content to
+        // identify the offender - this is that evidence door.
+        std::fprintf(
+            stderr, "[scene-dump] h=%u type=%u pos=(%.1f,%.1f,%.1f) size=(%.2f,%.2f,%.2f) tex='%s' emis=%.2f\n",
+            handle, object.type, object.position[0], object.position[1], object.position[2], object.size[0],
+            object.size[1], object.size[2], object.textureSet.c_str(), object.emissiveStrength);
+    }
     if (addedChannel != nullptr)
     {
         addedChannel->publish(SceneObjectAddedEvent{.objectHandle = handle});
@@ -636,6 +649,7 @@ bool SceneModule::mesh(
         return false;
     }
     outMesh = found->second.mesh;
+    outMesh.name = found->second.name; // rev 28: the proxy pass reads the prefix
     return true;
 }
 
@@ -706,6 +720,24 @@ void SceneModule::objectSnapshotInto(
             }
         }
     }
+}
+
+void SceneModule::setEnvironment(
+    const SceneEnvironmentOverride &environment
+)
+{
+    // Store-always, bump-on-change: the sequence is the renderer's
+    // skip-identical-frames key (an integer compare per frame), so a mod
+    // that re-pushes the same atmosphere state every frame must not bump
+    // it. SceneEnvironmentOverride is a flat POD of floats - the default
+    // memberwise compare is exact and branch-free.
+    if (environment == environmentState_)
+    {
+        return;
+    }
+    const std::uint32_t previousSequence = environmentSequence_;
+    environmentState_        = environment;
+    environmentSequence_     = previousSequence + 1u;
 }
 
 std::vector<SceneCapability::ObjectHandle> SceneModule::objectHandles() const

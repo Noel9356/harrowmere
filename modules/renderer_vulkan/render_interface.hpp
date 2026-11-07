@@ -68,6 +68,15 @@ struct FrameRenderContext
     vk::ImageView emissiveView; // RGBA16F: rgb emissive radiance
     vk::ImageView depthView;    // D32_SFLOAT
 
+    // Rev 31 (the layered depth buffer): the transparency layer written by
+    // the transparency pass - the nearest transparent surface's albedo +
+    // roughness, world normal + authored alpha, and NDC depth. The composite
+    // blends the layer over the opaque result; the lighting consumers stay
+    // on the opaque depth (the refracted view is what they shade).
+    vk::ImageView transAlbedoView; // RGBA8_UNORM: rgb albedo, a roughness
+    vk::ImageView transNormalView; // RGBA16F: rgb world normal, a authored alpha
+    vk::ImageView transDepthView;  // R32_SFLOAT: NDC depth (1.0 where no transparent surface drew)
+
     // Lighting targets. A target is a real image only when at least one
     // attached technique declares it as output; otherwise the composite path
     // receives a cleared 1x1 stand-in and skips reading it. Techniques add
@@ -75,6 +84,11 @@ struct FrameRenderContext
     // modulate instead of add belongs in the composite pass, not here.
     vk::ImageView directRadianceView;   // RGBA16F: radiance from directly evaluated emitters
     vk::ImageView indirectRadianceView; // RGBA16F: diffuse GI irradiance / pi (transport)
+    // The IMAGE behind indirectRadianceView. Image copies (a technique
+    // mirroring its output into a history buffer) need the image handle, not
+    // the view; the dummy 1x1 image stands in when no technique declared the
+    // target, mirroring the view's stand-in rule.
+    vk::Image indirectRadianceImage;
     vk::ImageView indirectSpecularView; // RGBA16F: Fresnel-weighted reflection radiance
 
     // Shared scene data (uploaded by the renderer from [scene]).
@@ -85,6 +99,14 @@ struct FrameRenderContext
     vk::ImageView dataArrayView;   // RGBA8_UNORM 2D array: R rough, G metallic, BA normal xy
     vk::Buffer environmentBuffer;  // std140 EnvironmentUniform (sky gradient + sun disk)
     vk::Buffer cameraBuffer;       // uniform CameraData
+    // Rev 25 (the shadow round): the terrain heightfield shadow grid.
+    // heightfieldView is a R32_SFLOAT 2D image holding normalized heights
+    // over the terrain patch (dummy 1x1 view when the grid was not built);
+    // heightfieldParams = (worldSize metres, heightMin, heightMax, enabled).
+    // Lighting techniques march it for terrain self-shadowing
+    // (lighting_common.glsl terrainShadow).
+    vk::ImageView heightfieldView;                 // R32_SFLOAT heights (dummy when disabled)
+    std::array<float, 4> heightfieldParams{};      // worldSize, heightMin, heightMax, enabled
     // Perspective near/far planes (meters). The GI spatial filter linearizes
     // buffer depth with them - NDC depth differences cannot express one
     // edge-awareness metric across the depth range.
@@ -97,6 +119,12 @@ struct FrameRenderContext
     // The renderer keeps cameraData as a member and writes the position
     // straight from the configured [scene.camera] every frame.
     std::array<float, 3> cameraPosition = {0.0f, 0.0f, 0.0f};
+    // The camera's full projection matrices this frame (the same bytes
+    // CameraData carries). The temporal techniques reproject last frame's
+    // gathered light with them - a pass that needed the matrix would
+    // otherwise have to map the renderer's camera buffer itself.
+    std::array<float, 16> cameraViewProjection{};
+    std::array<float, 16> cameraInverseViewProjection{};
 };
 
 // Which radiance layers a technique writes. Declared per technique so the

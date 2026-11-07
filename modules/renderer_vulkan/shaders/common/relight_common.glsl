@@ -18,6 +18,10 @@
 #ifndef ENGINE_RELIGHT_COMMON_GLSL
 #define ENGINE_RELIGHT_COMMON_GLSL
 
+// This shared header serves tracing consumers whose descriptor layouts do
+// not all carry the heightfield shadow grid (rev 25): the relight compiles
+// against the plain SDF-only field (terrainShadow degrades to 1.0).
+#define ENGINE_LIGHTING_NO_HEIGHTFIELD
 #include "lighting_common.glsl"
 #include "materials_common.glsl"
 

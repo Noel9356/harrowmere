@@ -1,0 +1,91 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// The GI pass's bilateral UPSAMPLE (rev 31): the gather + denoise run at
+// HALF resolution (the SDF march is the cost - a full-res 2-ray 96-step
+// gather measured 50-100 s per frame under the capture rig's software
+// rasterizer, so a 180 s capture window saw FOUR frames and the temporal
+// accumulator never converged - the owner's "this GI is noisy"). This pass
+// lifts the filtered half-res result to the full-res target with a
+// depth/normal-aware bilinear: the 2x2 half-res quad around each pixel
+// blends under bilinear weights gated by depth similarity and normal
+// agreement, so edges keep the sharp half-res terminator instead of
+// smearing across a silhouette.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 1, binding = 7) uniform sampler2D halfFilterSampler; // rgb filtered irradiance/pi, a view depth (HALF res)
+layout(set = 1, binding = 8, rgba16f) uniform restrict writeonly image2D fullTargetImage; // the renderer's indirectRadiance target
+layout(set = 1, binding = 2) uniform sampler2D depthSampler;   // FULL res
+layout(set = 1, binding = 1) uniform sampler2D normalSampler;  // FULL res
+
+#include "scene_common.glsl"
+
+void main()
+{
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    const ivec2 fullRes = imageSize(fullTargetImage);
+    if (pixel.x >= fullRes.x || pixel.y >= fullRes.y)
+    {
+        return;
+    }
+    const vec2 uv = (vec2(pixel) + 0.5) / vec2(fullRes);
+    const float depth = texture(depthSampler, uv).r;
+    if (depth >= 1.0)
+    {
+        // Sky: the gather's half-res sky sentinel passes through (no GI on
+        // sky; the composite's sky branch ignores this target).
+        imageStore(fullTargetImage, pixel, vec4(0.0, 0.0, 0.0, 60000.0));
+        return;
+    }
+
+    const ivec2 halfRes = fullRes / ivec2(2);
+    const vec3 fullNormal = normalize(texture(normalSampler, uv).xyz);
+    const vec3 worldPosition = worldPositionFromDepth(inverseViewProjection, uv * 2.0 - vec2(1.0), depth);
+    const float fullViewDepth = length(worldPosition - cameraPosition.xyz);
+    const float depthBand = max(0.35, 0.12 * fullViewDepth);
+
+    // The 2x2 half-res quad with bilinear weights (the fractional position
+    // between half-res texel centers).
+    const vec2 pos = uv * vec2(halfRes) - 0.5;
+    const ivec2 base = ivec2(floor(pos));
+    const vec2 frac = pos - vec2(base);
+
+    vec3 sum = vec3(0.0);
+    float weightSum = 0.0;
+    vec3 fallback = vec3(0.0);
+    float fallbackDistance = 1e30;
+    for (int dy = 0; dy < 2; ++dy)
+    {
+        for (int dx = 0; dx < 2; ++dx)
+        {
+            const ivec2 tapPixel = clamp(base + ivec2(dx, dy), ivec2(0), halfRes - ivec2(1));
+            const vec4 tap = texelFetch(halfFilterSampler, tapPixel, 0);
+            const vec2 bilinear = mix(vec2(1.0) - frac, frac, vec2(dx, dy));
+            float weight = bilinear.x * bilinear.y;
+            if (tap.a >= 30000.0)
+            {
+                weight = 0.0; // sky tap beside a surface: not part of the blend
+            }
+            else
+            {
+                weight *= exp(-abs(tap.a - fullViewDepth) / depthBand);
+                const vec3 tapNormal = normalize(texelFetch(normalSampler, tapPixel * ivec2(2), 0).xyz);
+                weight *= pow(max(dot(tapNormal, fullNormal), 0.0), 8.0);
+                const float d = abs(tap.a - fullViewDepth);
+                if (d < fallbackDistance)
+                {
+                    fallbackDistance = d;
+                    fallback = tap.rgb;
+                }
+            }
+            sum += tap.rgb * weight;
+            weightSum += weight;
+        }
+    }
+
+    // All taps rejected (a silhouette the half-res grid has no surface
+    // sample for): the nearest-depth tap keeps the edge term-free instead
+    // of printing a black hole.
+    const vec3 result = weightSum > 1e-4 ? sum / weightSum : fallback;
+    imageStore(fullTargetImage, pixel, vec4(result, fullViewDepth));
+}

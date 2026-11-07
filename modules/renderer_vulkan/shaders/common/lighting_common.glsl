@@ -18,6 +18,15 @@ layout(std140, set = 0, binding = 2) uniform LightUniform
     vec4 pointColorIntensity[maxPointLights];    // rgb color, w intensity
 };
 
+// The terrain heightfield shadow grid (rev 25, see terrainShadow below). The
+// renderer's lighting techniques bind the R32 height grid here; every
+// consumer of this header that does NOT have the grid in its descriptor
+// layout (the deleted radiance-cascades tree) must define
+// ENGINE_LIGHTING_NO_HEIGHTFIELD before including this file.
+#ifndef ENGINE_LIGHTING_NO_HEIGHTFIELD
+layout(set = 0, binding = 3) uniform sampler2D heightfieldSampler;
+#endif
+
 // Soft shadow along a ray using the analytic SDF: classic penumbra estimate
 // (min of k * d / t). Returns 1.0 fully lit, 0.0 fully shadowed.
 //
@@ -32,6 +41,26 @@ layout(std140, set = 0, binding = 2) uniform LightUniform
 float softShadow(vec3 origin, vec3 direction, float maxDistance, uint primitiveCount, uint steps, float penumbra)
 {
     float t = 0.02;
+    // Rev 28 - exit whatever contains the origin, ALONG THE RAY. The rev-25
+    // occluder proxies wrap each mesh instance in its bounding box, and a
+    // SMOOTH mesh (the rev-28 organic characters, the rounded canopies)
+    // sits strictly INSIDE that box almost everywhere - a shadow ray born
+    // on the mesh surface reported an immediate "hit" against its own
+    // proxy and the whole figure dithered black per pixel (the fp32 world
+    // reconstruction decides inside/outside per texel). Marching forward
+    // out of the containing shell (max three overlaps, 2 cm clearance past
+    // the last face) restores the correct answer: the proxy still shades
+    // the GROUND around the character, other occluders still shade the
+    // character, and the owner's own shell stops killing its own rays.
+    for (uint exit = 0u; exit < 3u; ++exit)
+    {
+        const float insideDepth = sceneSDF(origin + direction * t, primitiveCount);
+        if (insideDepth >= 0.0)
+        {
+            break;
+        }
+        t += -insideDepth + 0.02;
+    }
     float shadow = 1.0;
     for (uint step = 0u; step < steps; ++step)
     {
@@ -49,6 +78,65 @@ float softShadow(vec3 origin, vec3 direction, float maxDistance, uint primitiveC
     }
     return clamp(shadow, 0.0, 1.0);
 }
+
+// Terrain heightfield shadow grid (rev 25, the shadow round). The terrain is
+// a MESH in the analytic field's terms, so hills cast no SDF shadow and the
+// light pooled flat over every capture. The renderer builds one R32_SFLOAT
+// grid (256x256 over the patch, heights normalized to [0, 1]) from the
+// terrain mesh's vertices and publishes it at set 0 / binding 3; shadow rays
+// march this grid the classic heightfield way.
+//
+// params = (worldSize metres, heightMin metres, heightMax metres, enabled).
+// The patch spans [0, worldSize] on both XZ axes (the terrain mesh's world
+// origin), so the lookup is a plain divide - no offset, no rotation.
+#ifdef ENGINE_LIGHTING_NO_HEIGHTFIELD
+float terrainShadow(vec3 origin, vec3 direction, float maxDistance, vec4 params)
+{
+    return 1.0; // no grid bound: the pre-rev-25 behavior
+}
+#else
+float terrainHeightAt(vec2 worldXZ, vec4 params)
+{
+    const vec2 uv = worldXZ / max(params.x, 1.0);
+    return params.y + textureLod(heightfieldSampler, uv, 0.0).r * max(params.z - params.y, 0.01);
+}
+
+// Heightfield shadow factor along a ray: 0 when the ray dips under the
+// terrain, a classic penumbra estimate where it grazes a ridge. 48 steps
+// with a 12% growth rate reach well past 400 m - far enough for the rev-25
+// relief (hill wavelengths are 300-1600 m) while the early-out (above the
+// patch's max height) clears most rays within a handful of steps.
+float terrainShadow(vec3 origin, vec3 direction, float maxDistance, vec4 params)
+{
+    if (params.w < 0.5)
+    {
+        return 1.0;
+    }
+    const float ceiling = params.z + 1.5; // metres above the highest vertex
+    float shadow = 1.0;
+    float t = 1.0;
+    for (uint step = 0u; step < 48u; ++step)
+    {
+        const vec3 point = origin + direction * t;
+        if (point.y > ceiling)
+        {
+            return shadow;
+        }
+        const float diff = point.y - terrainHeightAt(point.xz, params);
+        if (diff < 0.0)
+        {
+            return 0.0; // inside the hill
+        }
+        shadow = min(shadow, 10.0 * diff / t);
+        if (shadow < 0.01 || t > maxDistance)
+        {
+            break;
+        }
+        t += max(3.0, 0.12 * t);
+    }
+    return clamp(shadow, 0.0, 1.0);
+}
+#endif // ENGINE_LIGHTING_NO_HEIGHTFIELD
 
 // Surface normal from the analytic SDF (used for relighting hit points inside
 // the GI march, where no rasterized normal exists). Tetrahedron technique:

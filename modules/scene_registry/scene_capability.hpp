@@ -42,6 +42,22 @@ inline constexpr std::uint32_t sphere = 1;
 inline constexpr std::uint32_t mesh = 2;
 } // namespace scene_object_type
 
+// Transparency classes of the LAYERED DEPTH BUFFER (rev 31, the owner's
+// proposal). The geometry pass no longer forces every object through one
+// depth: OPAQUE geometry fills layer 0 (the classic G-buffer every lighting
+// consumer reads), SEMI-TRANSPARENT geometry (the water plane, future glass)
+// fills a SECOND depth+material layer the composite blends over layer 0 with
+// a per-pixel depth-delta opacity, and FULLY-TRANSPARENT geometry (future
+// alpha-cut foliage, particles) is classified for the consumers but writes no
+// surface contribution yet. The class is data, not a render-side guess: a
+// mod (or a [scene.objects] row) names it explicitly.
+namespace scene_object_transparency
+{
+inline constexpr std::uint32_t opaque            = 0;
+inline constexpr std::uint32_t semi_transparent  = 1;
+inline constexpr std::uint32_t fully_transparent = 2;
+} // namespace scene_object_transparency
+
 // Floats per vertex in SceneMeshDescriptor::vertices: position xyz, normal
 // xyz, interleaved. This is the same layout the renderer's unit meshes use
 // (the geometry pass consumes registered meshes through the same vertex input
@@ -76,6 +92,15 @@ struct SceneObjectDescriptor
     // shared: several objects may instance one mesh, each through its own
     // transform and material.
     std::uint32_t meshHandle = 0;
+    // rev 34: per-axis instance scale for MESH objects (meters per authored
+    // meter; default 1 = every pre-34 object keeps its exact size). The
+    // renderer applies it to the drawn vertices AND the tracing proxy box,
+    // so rasterized and traced geometry stay the same shape. Analytic
+    // primitives ignore it (their size IS the scale).
+    std::array<float, 3> scale = {1.0f, 1.0f, 1.0f};
+    // Rev 31 (the layered depth buffer): which depth layer the object fills.
+    // Defaults to opaque - every pre-rev-31 object keeps its exact behavior.
+    std::uint32_t transparency = scene_object_transparency::opaque;
 };
 
 // One registered triangle mesh, in the object's local space (meters). The
@@ -92,6 +117,44 @@ struct SceneMeshDescriptor
     std::vector<std::uint32_t> indices;                  // triangle list
     std::array<float, 3> boundsMin = {0.0f, 0.0f, 0.0f}; // registry-computed
     std::array<float, 3> boundsMax = {0.0f, 0.0f, 0.0f}; // registry-computed
+    // The registered name (rev 28: the renderer's proxy pass reads the
+    // vocabulary prefix to give the organic character parts ONE shared
+    // figure proxy instead of four overlapping bbox proxies - a crowd of
+    // four-part characters otherwise spends eight primitives per villager
+    // and overflows the 1024-primitive analytic field).
+    std::string name;
+};
+
+// The RUNTIME environment override: the mod-driven slice of the sky/light
+// state the renderer's [scene] description would otherwise own statically.
+// A game mod pushes this per frame (atmosphere: time-of-day sky gradient,
+// fog, exposure, moon); the renderer merges it OVER the static scene base
+// whenever the registry reports a new sequence. Fields the game does not
+// drive stay at their neutral sentinels (negative exposure = "keep the
+// configured value"; a zero-length moon direction = "no moon term").
+struct SceneEnvironmentOverride
+{
+    std::array<float, 3> skyZenith   = {0.0f, 0.0f, 0.0f}; // linear RGB
+    std::array<float, 3> skyHorizon  = {0.0f, 0.0f, 0.0f}; // linear RGB
+    std::array<float, 3> skyGround   = {0.0f, 0.0f, 0.0f}; // linear RGB
+    float fogDensity                 = 0.0f;               // [0, 1]; 0 = clear
+    std::array<float, 3> fogTint     = {0.7f, 0.7f, 0.7f}; // linear RGB
+    float exposure                   = -1.0f;              // <= 0: keep the configured exposure
+    std::array<float, 3> moonDirection = {0.0f, 0.0f, 0.0f}; // unit vector towards the scene; zero = no moon
+    float moonIntensity              = 0.0f;
+    std::array<float, 3> sunColor    = {1.0f, 1.0f, 1.0f};  // the sun disc + direct light color
+    float sunIntensity               = -1.0f;               // <= 0: keep the lighting provider's value
+    // rev 26: the LIVE sun direction (towards the scene). The sun DISK used
+    // to sit at the static [scene].sun direction forever - the animated sun
+    // moved, the visible disk did not, and every camera aimed at the real
+    // light (the coast staging) framed an empty sky with the glitter path
+    // pointing at nothing. A zero vector keeps the static direction (the
+    // pre-rev-26 behavior).
+    std::array<float, 3> sunDirection = {0.0f, 0.0f, 0.0f};
+
+    // The exact memberwise compare the registry's bump-on-change gate uses
+    // (the same idiom the renderer's material diagnostics table uses).
+    bool operator==(const SceneEnvironmentOverride &) const = default;
 };
 
 // One scene object's transform slice: the fields a transform consumer
@@ -163,11 +226,31 @@ public:
     static constexpr std::uint32_t defaultMaxObjects = 32;
     // The engine-wide GPU capacity (renderer's primitive/material buffer
     // allocation size; also the hard ceiling for the configured cap).
-    static constexpr std::uint32_t gpuMaxObjects = 256;
+    static constexpr std::uint32_t gpuMaxObjects = 1024;
 
     // Registry mesh limits: meshes are assets shared by instances, so a
     // modest count is enough; the vertex cap bounds one mesh's GPU buffer.
-    static constexpr std::uint32_t maxMeshes       = 8;
+    // (rev 24: 8 -> 16 - the proper-tree-models round registers a trunk +
+    // canopy per species with a small variant each, which - on top of the
+    // terrain and water planes - needs ten slots; rev 26 replaces the
+    // procedural trees with the converted Kenney CC0 vocabulary (prop_mesh_
+    // data_cc0.h: 13 tree slots), adds three market props and nine blocky-
+    // character part meshes (three body variants x {body, legs, head} x two
+    // baked scales) - 34 slots with headroom for a future glTF import;
+    // rev 27 bakes the walk gait: each variant+scale gains two stride
+    // poses ({body, legs} x 2 poses x 6 sets = 24 more rows, 57 total) -
+    // 64 kept headroom for the future glTF import. rev 28: the organic
+    // round adds six hair-cap meshes ({3 styles} x {2 scales}, 63 table
+    // rows) and the terrain + water planes take two more slots, so 64
+    // overflowed and silently dropped the market cart and the dead tree
+    // (the 2026-11-06 capture log refused both). 96 restores the headroom.
+    // rev 34: 96 -> 128 (A-209) - the character-assembly part vocabulary
+    // (11 meshes: the downloaded CC0 donor parts + the authored organic-style
+    // parts) hit the A-208 cap's silent-refusal disease again: the registry
+    // refused every chimera_* row and the lab spawned nothing. The GPU cost
+    // of 32 more slot descriptors is trivial; the vocabulary is registered
+    // once at startup.
+    static constexpr std::uint32_t maxMeshes       = 128;
     static constexpr std::uint32_t maxMeshVertices = 1000000;
 
     virtual ~SceneCapability() = default;
@@ -264,6 +347,16 @@ public:
     // surface, so the existing pure-virtual contract above is untouched.
     // Main thread only, like every capability call.
     virtual void objectSnapshotInto(std::vector<SceneObjectDescriptor> &outObjects) const = 0;
+
+    // The runtime environment override (see SceneEnvironmentOverride).
+    // Default no-ops keep every existing SceneCapability implementation
+    // compiling; the scene registry overrides both. A mod pushes per frame;
+    // the registry stores the latest state and bumps an integer sequence
+    // ONLY when a pushed state differs from the stored one, so a renderer
+    // that skips identical frames by sequence compare stays correct.
+    virtual void setEnvironment(const SceneEnvironmentOverride & /*environment*/) {}
+    virtual SceneEnvironmentOverride environment() const { return {}; }
+    virtual std::uint32_t environmentSequence() const { return 0; }
 };
 
 } // namespace engine

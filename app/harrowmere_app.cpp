@@ -335,7 +335,7 @@ FramePacing readPacingConfiguration(
 struct CaptureScenarioSetup
 {
     std::uint64_t seed = 0;
-    double quitAfterSeconds = 1.0;
+    double quitAfterSeconds = 40.0; // the capture window (panels_open renders ~7 s/frame on lavapipe)
     double timeOfDayGameHours = 10.0;
     std::uint32_t weatherKind = 0;
     bool panelsOpen = false;
@@ -345,24 +345,59 @@ std::optional<CaptureScenarioSetup> resolveCaptureScenario(
     const std::string &name
 )
 {
-    // The pinned seed (CAPTURE_SUITE_SEED = 20261103, capture_scenarios.hpp).
-    constexpr std::uint64_t kSeed = 20261103ull;
+    // Rev 25 (the drama round): the day scenes move OFF the flat noon key.
+    // The sun path is (cosA, sinA, 0) - phase 0.5 = directly overhead, zero
+    // modelling, and the pre-rev-25 captures (walk_village at 12:00) read as
+    // a sheet. The new times put the sun at 26-52 degrees elevation so the
+    // rev-25 shadows (mesh proxies + terrain heightfield) and the golden
+    // curve actually show. corpse_aftermath keeps its pinned 18:00 sunset;
+    // spawn_night keeps 2:00.
+    const std::uint64_t kSeed = 20261103ull;
     if (name == "spawn_day")
-        return CaptureScenarioSetup{kSeed, 1.0, 10.0, 0, false};
+        return CaptureScenarioSetup{kSeed, 130.0, 9.0, 0, false};
     if (name == "spawn_night")
-        return CaptureScenarioSetup{kSeed, 1.0, 2.0, 0, false};
+        return CaptureScenarioSetup{kSeed, 130.0, 2.0, 0, false};
     if (name == "walk_village")
-        return CaptureScenarioSetup{kSeed, 1.0, 12.0, 0, false};
+        return CaptureScenarioSetup{kSeed, 130.0, 8.5, 0, false};
     if (name == "walk_frontier")
-        return CaptureScenarioSetup{kSeed, 1.0, 14.0, 0, false};
+        return CaptureScenarioSetup{kSeed, 130.0, 16.5, 0, false}; // rev 25: the frontier is the slowest scenario - lavapipe
+        // starved the PNG encode inside 40 s three times running (the
+        // "capture still encoding at shutdown" drop)
     if (name == "coast")
-        return CaptureScenarioSetup{kSeed, 1.0, 11.0, 0, false};
+        return CaptureScenarioSetup{kSeed, 130.0, 15.75, 0, false};
     if (name == "rain")
-        return CaptureScenarioSetup{kSeed, 1.0, 13.0, 2, false};
+        return CaptureScenarioSetup{kSeed, 130.0, 10.5, 2, false};
     if (name == "panels_open")
-        return CaptureScenarioSetup{kSeed, 1.0, 10.0, 0, true};
+        return CaptureScenarioSetup{kSeed, 130.0, 9.25, 0, false};
     if (name == "corpse_aftermath")
-        return CaptureScenarioSetup{kSeed, 1.0, 18.0, 0, false};
+        return CaptureScenarioSetup{kSeed, 130.0, 18.0, 0, false};
+    // Rev 26 - the street-level crowd shot (the rev-25 debt note's "natural
+    // next evidence"): 15.6h keeps the sun at ~36 degrees in the west (the
+    // 16.4h first staging read half-exposed dark inside the cottage ring);
+    // the rig stages the camera IN the square looking west into the sun,
+    // with the blocky crowd (CHARACTER_DETAIL_RADIUS_M promotions) around
+    // the well. Rev 27: 15.6 -> 14.8h - at 36 degrees the cottages on the
+    // square's west side shadowed the plaza itself, and the crowd read as
+    // dusk-flat silhouettes; at ~45 degrees the square is sunlit while the
+    // key stays warm and raking.
+    if (name == "crowd_street")
+        return CaptureScenarioSetup{kSeed, 130.0, 14.8, 0, false};
+    // rev 34 - the character-customisation lab: the hybrid assembly beside
+    // its variant on the stone pad SE-E of spawn. Daylight (the 10.0 sun)
+    // so the proportions and dyes read; 90 s gives the software rasterizer
+    // a few frames for the temporal ramp.
+    if (name == "character_lab")
+        return CaptureScenarioSetup{kSeed, 90.0, 10.0, 0, false};
+    // rev 30 - the GI validation chamber: a sealed Cornell-style room SE of
+    // the spawn village. Time of day is irrelevant inside (no sun enters);
+    // the pinned 10:00 keeps the staging identical to the day runs. The
+    // window is also the temporal GI's convergence budget. Rev 31: 180 ->
+    // 300 s - the half-res gather roughly halved the frame cost, but the
+    // software rasterizer still spends tens of seconds per frame, and the
+    // running-average ramp needs FRAMES: the chamber's read-out quality is
+    // frame-count-bound, not filter-bound.
+    if (name == "gi_room")
+        return CaptureScenarioSetup{kSeed, 420.0, 10.0, 0, false};
     return std::nullopt;
 }
 
@@ -494,7 +529,7 @@ int HarrowmereApp::run(
         {
             std::cerr << "harrowmere: unknown capture scenario '" << captureScenario << "'\n"
                       << "  known scenarios: spawn_day, spawn_night, walk_village, walk_frontier, "
-                      << "coast, rain, panels_open, corpse_aftermath\n";
+                      << "coast, rain, panels_open, corpse_aftermath, crowd_street, gi_room, character_lab\n";
             return 2;
         }
         const auto &s = *scenarioSetup;
@@ -503,7 +538,18 @@ int HarrowmereApp::run(
         stagedOverrides.emplace_back("harrowmere.time_of_day_game_hours=" + std::to_string(s.timeOfDayGameHours));
         stagedOverrides.emplace_back("harrowmere.weather_kind=" + std::to_string(s.weatherKind));
         stagedOverrides.emplace_back(std::string("harrowmere_ui.visible_on_start=") + (s.panelsOpen ? "1" : "0"));
-        stagedOverrides.emplace_back("harrowmere_ui.follow_camera=1");
+        // The camera: EVERY capture scenario holds the static [scene] camera
+        // the rig's per-scenario scene file stages (the aerial village, the
+        // village drone shot, the frontier and coast framings). The follow
+        // camera (the game's own first-person rig) lost the eye-level ground
+        // to grazing-angle z-fighting at this depth range and put the eye
+        // inside its own avatar's head; the capture evidence needs the world
+        // seen, not the rig fought. The interactive game keeps the follow
+        // camera (7.4P1) - only --capture-scenario runs pin the static rig.
+        stagedOverrides.emplace_back("harrowmere_ui.follow_camera=0");
+        // The scenario name itself: the mod's staging reads it to re-place
+        // the player (the walk/coast/frontier views) and stage the corpse.
+        stagedOverrides.emplace_back("harrowmere.capture_scenario=" + captureScenario);
         // Force the frame-time measurement on for the capture run: the
         // percentile report at shutdown reads from the frameSamples ring
         // buffer, which is only populated when diagnosticsEnabled is true.

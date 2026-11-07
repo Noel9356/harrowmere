@@ -35,6 +35,20 @@ enum class SceneObjectType : std::uint32_t
     Mesh = 2,
 };
 
+// The layered depth buffer's transparency classes (rev 31, mirroring
+// scene_capability.hpp's scene_object_transparency constants). Opaque
+// geometry fills the classic G-buffer; semi-transparent geometry (the water
+// plane, future glass) fills a second depth/material layer the composite
+// blends over layer 0 with a per-pixel depth-delta opacity; fully
+// transparent geometry is classified (its first citizens - rain/particles -
+// arrive with the particle round) and currently contributes no surface.
+enum class SceneTransparency : std::uint32_t
+{
+    Opaque            = 0,
+    SemiTransparent   = 1,
+    FullyTransparent  = 2,
+};
+
 struct SceneObject
 {
     SceneObjectType type          = SceneObjectType::Box;
@@ -59,11 +73,23 @@ struct SceneObject
     float uvScale = 1.0f;
     // Mesh objects (SceneObjectType::Mesh): the registry mesh instanced here
     // (a SceneCapability::MeshHandle). Zero for analytic primitives. The
-    // raster path draws the mesh's vertices translated/rotated by the object
-    // transform WITHOUT scaling (mesh vertices are authored in meters); the
-    // tracing consumers receive a box proxy of the mesh's bounding box
-    // (this struct's size field), rotated with the object.
+    // raster path draws the mesh's vertices translated/rotated/scaled by the
+    // object transform (rev 34: `scale` - the character-assembly parts are
+    // one vocabulary instanced at per-part proportions; the default 1 keeps
+    // every pre-34 object exactly its old size); the tracing consumers
+    // receive a box proxy of the mesh's scaled bounding box (this struct's
+    // size field carries the registry half extents - the scale multiplies
+    // them at upload).
     std::uint32_t meshHandle = 0;
+    // Per-axis instance scale for MESH objects (meters per authored meter).
+    // Analytic primitives ignore it (their size IS the scale). The SDF proxy
+    // and the geometry pass apply the same axis scales, so rasterized and
+    // traced geometry agree.
+    std::array<float, 3> scale = {1.0f, 1.0f, 1.0f};
+    // Rev 31 (the layered depth buffer): which depth layer the object fills.
+    // Opaque by default - every pre-rev-31 object keeps its exact behavior.
+    // The mod's water plane classifies semi-transparent at spawn.
+    SceneTransparency transparency = SceneTransparency::Opaque;
 
     // Exact value equality, used by the scene re-sync's no-op short-circuit
     // (refreshSceneRegistry): a change event whose content already matches
@@ -88,7 +114,11 @@ struct SceneCamera
     std::array<float, 3> position    = {0.0f, 1.6f, 3.5f};
     std::array<float, 3> lookAt      = {0.0f, 1.0f, 0.0f};
     float verticalFieldOfViewDegrees = 60.0f;
-    float nearPlane                  = 0.05f;
+    // 0.5 m: the eye-level ground at grazing angles needs depth precision the
+    // 0.05/far=20000 pair cannot give (the 2 m water sink lost every z-fight
+    // beyond ~100 m and the village read flooded). 0.5 clips nothing a
+    // first-person eye touches and buys 10x the precision at 300 m.
+    float nearPlane                  = 0.5f;
     float farPlane                   = 500.0f;
     // Free-fly controls ([scene.camera] free_fly). When enabled the camera
     // starts at position/look_at and is then driven by the keyboard and mouse

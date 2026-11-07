@@ -229,7 +229,9 @@ void RendererState::uploadSceneData()
     // Cleared per call; capacity survives at the high-water mark.
     std::vector<GpuScenePrimitive> &primitives = primitiveUploadScratch;
     primitives.clear();
-    primitives.reserve(std::max<std::size_t>(activeObjects.size(), 1));
+    // Rev 25: mesh instances may each add ONE occluder proxy (see below), so
+    // reserve for the worst case up front.
+    primitives.reserve(std::max<std::size_t>(activeObjects.size() * 2, 1));
     for (const SceneObject &object : activeObjects)
     {
         GpuScenePrimitive primitive;
@@ -238,16 +240,15 @@ void RendererState::uploadSceneData()
                 object.position[1],
                 object.position[2],
                 static_cast<float>(static_cast<std::uint32_t>(object.type))};
-        // Mesh objects enter the analytic world as their ORIENTED BOUNDING
-        // BOX: a real box primitive (type box) carrying the registry mesh's
-        // half extents (object.size) and the object's own material. The SDF
-        // consumers (GI, reflections, shadows) then see a closed, exact box
-        // where the mesh stands - the documented proxy contract
-        // (scene_capability.hpp). The rasterized path draws the actual
-        // triangles instead.
-        primitive.positionType[3] = object.type == SceneObjectType::Mesh
-                                      ? static_cast<float>(static_cast<std::uint32_t>(SceneObjectType::Box))
-                                      : static_cast<float>(static_cast<std::uint32_t>(object.type));
+        // Mesh objects carry their TRUE type into the analytic field: the
+        // tracing consumers (sceneSDFOwned) skip mesh-typed primitives - the
+        // field stays box/sphere-only, meshes shade through the raster path
+        // (the graphics-uplift contract). The previous body tagged meshes as
+        // BOX with their bbox half extents, so the 16 km terrain entered the
+        // SDF as one world-spanning solid: every shadow ray started INSIDE
+        // it and the whole world shaded black. The bbox half extents still
+        // ride object.size for the collider/proxy readers; the field just
+        // never sees them as occluders any more.
         primitive.sizeRotation    = {object.size[0], object.size[1], object.size[2], object.rotationYRadians};
         primitive.albedoRoughness = {object.albedo[0], object.albedo[1], object.albedo[2], object.roughness};
         // Rotation trig baked for the SDF shaders (scene_description.hpp): the
@@ -258,6 +259,94 @@ void RendererState::uploadSceneData()
                 std::sin(object.rotationYRadians),
                 std::cos(object.rotationYRadians)};
         primitives.push_back(primitive);
+
+        // ---- rev 25: the mesh OCCLUDER PROXY --------------------------------
+        //
+        // Meshes cast no SDF shadow - which made every tree, stall and
+        // cottage sit in a shadowless puddle of ambient ("lighting is
+        // boring"). The fix: for every SMALL mesh instance, append an extra
+        // analytic primitive (box or sphere by shape) that spans the mesh's
+        // bbox, carrying the instance's transform. The tracer sees it; the
+        // raster path is untouched. The original mesh-typed entry stays so
+        // the "skip meshes" contract and every index-mapped consumer are
+        // unchanged - the proxies only ADD occlusion.
+        //
+        // The size gate keeps the two world-scale meshes out (the 8 km
+        // terrain patch and the 8 km water plane): a world-spanning proxy is
+        // exactly the "whole world shades black" bug this field's history
+        // records. Everything smaller - tree trunks and canopies (the only
+        // mesh kinds the mod spawns besides terrain/water) - becomes a real
+        // occluder, and houses' yard props (analytic boxes/spheres already)
+        // keep their exact shapes.
+        if (object.type == SceneObjectType::Mesh)
+        {
+            const auto found = meshPool.find(object.meshHandle);
+            // rev 34: the instance scale multiplies the mesh proxy's extents
+            // and the bounds centre - the traced box must wrap the SCALED
+            // mesh the raster pass draws.
+            const std::array<float, 3> meshScale = object.scale;
+            const float scaledMaxHalf = std::max({object.size[0] * meshScale[0], object.size[1] * meshScale[1],
+                object.size[2] * meshScale[2]});
+            if (found != meshPool.end() && scaledMaxHalf > 0.05f && scaledMaxHalf < 48.0f
+                && found->second.proxyMode == MeshGpu::ProxyMode::Bbox)
+            {
+                const std::array<float, 3> &center = found->second.localBoundsCenter;
+                const std::array<float, 3> &half   = found->second.halfExtents;
+                const float maxAxis   = std::max({half[0], half[1], half[2]});
+                const float minAxis   = std::min({half[0], half[1], half[2]});
+                // Blobby shapes (the noise-deformed canopies) shadow best as
+                // a sphere; tall-thin shapes (trunks) as the bbox box.
+                const bool blobby = minAxis > 0.55f * maxAxis;
+                // The 0.94 inset keeps the proxy just INSIDE the visual
+                // silhouette: a shadow ray grazing the drawn canopy leaves
+                // the proxy slightly early rather than shadowing air beyond
+                // the mesh.
+                constexpr float kInset = 0.94f;
+                GpuScenePrimitive proxy;
+                // The centre offset must rotate by the instance yaw to match
+                // the rasterized mesh (model = translate * rotateY). Trig
+                // comes from the object, not a re-evaluation.
+                const float sinY = std::sin(object.rotationYRadians);
+                const float cosY = std::cos(object.rotationYRadians);
+                proxy.positionType = {
+                    object.position[0] + (cosY * center[0] * meshScale[0] + sinY * center[2] * meshScale[2]),
+                    object.position[1] + center[1] * meshScale[1],
+                    object.position[2] + (-sinY * center[0] * meshScale[0] + cosY * center[2] * meshScale[2]),
+                    blobby ? 1.0f : 0.0f};
+                if (blobby)
+                {
+                    proxy.sizeRotation = {maxAxis * kInset, maxAxis * kInset, maxAxis * kInset, 0.0f};
+                } else
+                {
+                    proxy.sizeRotation = {half[0] * kInset * meshScale[0], half[1] * kInset * meshScale[1],
+                        half[2] * kInset * meshScale[2], object.rotationYRadians};
+                }
+                proxy.albedoRoughness = primitive.albedoRoughness;
+                proxy.metallicEmissiveStrength
+                    = {object.metallic, object.emissiveStrength, sinY, cosY};
+                primitives.push_back(proxy);
+            }
+            else if (found != meshPool.end() && scaledMaxHalf > 0.05f && scaledMaxHalf < 48.0f
+                     && found->second.proxyMode == MeshGpu::ProxyMode::Figure)
+            {
+                // Rev 28 - the organic character's ONE figure proxy: a slab
+                // spanning the whole villager (x/z half 0.30 m, y 0.02..1.85
+                // m), replacing the four overlapping part-bbox proxies. One
+                // occluder per villager still shades the ground contact and
+                // casts the crowd shadow, at a quarter of the primitives.
+                const float sinY = std::sin(object.rotationYRadians);
+                const float cosY = std::cos(object.rotationYRadians);
+                GpuScenePrimitive proxy;
+                proxy.positionType = {object.position[0], object.position[1] + 0.935f * meshScale[1],
+                                      object.position[2], 0.0f};
+                proxy.sizeRotation = {0.30f * meshScale[0], 0.915f * meshScale[1], 0.30f * meshScale[2],
+                                      object.rotationYRadians};
+                proxy.albedoRoughness = primitive.albedoRoughness;
+                proxy.metallicEmissiveStrength
+                    = {object.metallic, object.emissiveStrength, sinY, cosY};
+                primitives.push_back(proxy);
+            }
+        }
     }
     if (primitives.empty())
     {
@@ -285,6 +374,8 @@ void RendererState::uploadSceneData()
     std::memcpy(
         primitivesMapped, primitives.data(), static_cast<std::size_t>(primitives.size() * sizeof(GpuScenePrimitive))
     );
+    // Rev 25: publish the true primitive count for the frame context.
+    primitiveUploadCount = static_cast<std::uint32_t>(primitives.size());
 
     // Material table: one entry per primitive, resolving each object's
     // texture set name into array layer indices (materials_common.glsl
@@ -293,9 +384,13 @@ void RendererState::uploadSceneData()
     // world's list: runtime-spawned objects reference the registered sets by
     // name or render flat - new GPU texture layers require a real asset
     // upload path, which the incremental rebuild deliberately does not have.
+    //
+    // Rev 25: the table must stay INDEX-ALIGNED with the primitives buffer,
+    // so every appended occluder proxy gets a duplicate of its source
+    // object's entry (the relight/reflection paths read materials[owner]).
     std::vector<GpuSceneMaterial> &materialTable = materialUploadScratch;
     materialTable.clear();
-    materialTable.reserve(std::max<std::size_t>(activeObjects.size(), 1));
+    materialTable.reserve(std::max<std::size_t>(primitives.size(), 1));
     for (const SceneObject &object : activeObjects)
     {
         GpuSceneMaterial material;
@@ -313,6 +408,21 @@ void RendererState::uploadSceneData()
             }
         }
         materialTable.push_back(material);
+        // The occluder proxy duplicates the source object's material row so
+        // the two vectors stay the same length (see the proxy block above).
+        // Rev 28: the Figure/None proxy modes emit at most one proxy per
+        // character (the body part only), so the duplicate row rides the
+        // SAME predicate the proxy pass uses.
+        if (object.type == SceneObjectType::Mesh)
+        {
+            const auto found = meshPool.find(object.meshHandle);
+            const float maxHalf = std::max({object.size[0], object.size[1], object.size[2]});
+            if (found != meshPool.end() && maxHalf > 0.05f && maxHalf < 48.0f
+                && found->second.proxyMode != MeshGpu::ProxyMode::None)
+            {
+                materialTable.push_back(material);
+            }
+        }
     }
     if (materialTable.empty())
     {
@@ -380,6 +490,35 @@ bool RendererState::materialDiagnosticsChanged(
     return changed;
 }
 
+void RendererState::pullEnvironmentOverride()
+{
+    // The mod-driven atmosphere slice: one capability call plus one integer
+    // compare per frame. A new sequence re-resolves the effective exposure
+    // and rebuilds the environment buffer (the fog/moon fields live in it);
+    // the buffer upload itself happens inside buildEnvironmentBuffer.
+    if (sceneCapability == nullptr)
+    {
+        return;
+    }
+    const std::uint32_t sequence = sceneCapability->environmentSequence();
+    if (environmentOverrideLive && sequence == environmentSequenceSeen)
+    {
+        // Re-resolve the exposure every frame anyway: a live-configuration
+        // reload rewrites `exposure` from config, and the override must win
+        // back the very next frame.
+        if (environmentOverride.exposure > 0.0f)
+        {
+            exposure = environmentOverride.exposure;
+        }
+        return;
+    }
+    environmentOverride      = sceneCapability->environment();
+    environmentSequenceSeen  = sequence;
+    environmentOverrideLive  = true;
+    exposure = environmentOverride.exposure > 0.0f ? environmentOverride.exposure : configuredExposure;
+    buildEnvironmentBuffer();
+}
+
 void RendererState::refreshSceneRegistry()
 {
     // One frame-at-most re-sync: scene events only set the dirty flag; the
@@ -400,6 +539,49 @@ void RendererState::refreshSceneRegistry()
         {
             registryScratch.push_back(sceneObjectFromDescriptor(std::move(descriptor)));
         }
+        // Rev 29: the daylight emissive scale applies HERE - after the
+        // snapshot conversion, before the primitives upload and the draw
+        // cache rebuild both read activeObjects - so the raster G-buffer
+        // and the traced relight see ONE scaled value and the
+        // relight-vs-raster gates keep their band. The window_set quads
+        // also dim their ALBEDO with the same factor: the lit-glass texture
+        // kept painting bright yellow panes at noon even with the emissive
+        // gone (the 55% A-189 palette mix carries the set's own bright
+        // albedo); scaled to a 0.15 floor the panes read as dark day glass
+        // and return to full warmth as the glow fades in.
+        if (const float glowScale = emissiveDaylightScale(); glowScale < 0.999f)
+        {
+            const float albedoKeep = 0.15f + 0.85f * glowScale;
+            for (SceneObject &converted : registryScratch)
+            {
+                converted.emissiveStrength *= glowScale;
+                if (converted.textureSet == "window_lit")
+                {
+                    converted.albedo[0] *= albedoKeep;
+                    converted.albedo[1] *= albedoKeep;
+                    converted.albedo[2] *= albedoKeep;
+                }
+            }
+        }
+        // Runtime texture-set growth (the graphics-uplift round): the static
+        // [scene] parse registers the FILE's sets only, so every runtime-
+        // spawned object referencing a mod texture set resolved to layer -1
+        // and rendered flat fallback albedo forever (the flat-terrain
+        // symptom). First-use order merge here - the same idiom
+        // parseSceneDescription uses - registers the snapshot's new set
+        // names; a growth triggers the array rebuild below so the new sets
+        // become real GPU layers before the material table resolves.
+        bool textureSetsGrew = false;
+        for (const SceneObject &converted : registryScratch)
+        {
+            const std::string &set = converted.textureSet;
+            if (!set.empty() && scene.textureSetLayerIndex.find(set) == scene.textureSetLayerIndex.end())
+            {
+                scene.textureSetLayerIndex.emplace(set, static_cast<std::int32_t>(scene.textureSets.size()));
+                scene.textureSets.push_back(set);
+                textureSetsGrew = true;
+            }
+        }
         // No-op short-circuit: physics writes transforms back through the
         // registry every step (and the write-back fires a change event even
         // when the resolved state matches what is already live - a body
@@ -414,10 +596,16 @@ void RendererState::refreshSceneRegistry()
         // is unobservable - the dirty flag is consumed either way. The first
         // refresh after the capability connects always runs the full pass
         // (see sceneRegistrySyncedOnce): it is the adopt that uploads the
-        // list's meshes, not a re-upload of identical content.
-        if (sceneRegistrySyncedOnce && registryScratch == activeObjects)
+        // list's meshes, not a re-upload of identical content. A texture-set
+        // growth bypasses the short-circuit: the arrays rebuilt below must
+        // be followed by a material-table pass that resolves the new layers.
+        if (sceneRegistrySyncedOnce && registryScratch == activeObjects && !textureSetsGrew)
         {
             return;
+        }
+        if (textureSetsGrew)
+        {
+            rebuildSceneTextureArrays();
         }
         sceneRegistrySyncedOnce = true;
         // Swap, not move: the swap keeps BOTH buffers alive - activeObjects
@@ -456,12 +644,29 @@ void RendererState::rebuildObjectDrawCache()
         ObjectDrawCache cached;
         const bool isMeshObject = object.type == SceneObjectType::Mesh;
         // Analytic primitives are unit meshes scaled by half extents; a
-        // registered mesh is authored in meters and must NOT be scaled - its
-        // model is translate * rotateY only (the pass's scale contract).
-        const float unitScale[3] = {1.0f, 1.0f, 1.0f};
-        const float *scale       = isMeshObject ? unitScale : object.size.data();
+        // registered mesh is authored in meters and scales by its OWN
+        // per-axis instance scale (rev 34: the character-assembly parts;
+        // the default 1 preserves the old translate * rotateY contract).
+        const float *scale = isMeshObject ? object.scale.data() : object.size.data();
         cached.model             = modelMatrix(object.position.data(), object.rotationYRadians, scale);
         cached.albedoLayer       = object.textureSet.empty() ? -1 : scene.findTextureSetLayer(object.textureSet);
+        // Rev 25: the water plane flags itself through its texture set; the
+        // geometry pass rides the flag into meshBox.w for the shader's
+        // ripple/glitter branch.
+        cached.waterFlag         = (object.textureSet == "water") ? 1.0f : 0.0f;
+        // Rev 31 (the layered depth buffer): which pass draws this object.
+        // The water plane is the first semi-transparent citizen: it leaves the
+        // opaque G-buffer (layer 0) and fills the transparency layer instead,
+        // so the composite can blend it over the seabed/sky behind it with a
+        // per-pixel depth-delta opacity. The class comes from the descriptor;
+        // the "water" texture set is the data-driven backstop (a static
+        // scene.toml water row classifies itself without a mod).
+        cached.transparency      = object.transparency;
+        if (object.textureSet == "water"
+            && cached.transparency == SceneTransparency::Opaque)
+        {
+            cached.transparency = SceneTransparency::SemiTransparent;
+        }
         if (isMeshObject)
         {
             const auto found = meshPool.find(object.meshHandle);
@@ -553,6 +758,64 @@ void RendererState::ensureMeshesUploaded()
         gpu.geometry.indexCount       = static_cast<std::uint32_t>(mesh.indices.size());
         gpu.geometry.indexOffsetBytes = vertexBytes;
         gpu.indexCount                = gpu.geometry.indexCount;
+        // Rev 28: the per-vocabulary proxy mode from the registered name
+        // (see MeshGpu::ProxyMode - the organic character parts share one
+        // figure proxy instead of four overlapping bbox proxies).
+        if (mesh.name.rfind("npc_body", 0) == 0)
+        {
+            gpu.proxyMode = MeshGpu::ProxyMode::Figure;
+        }
+        else if (mesh.name.rfind("npc_", 0) == 0)
+        {
+            gpu.proxyMode = MeshGpu::ProxyMode::None;
+        }
+        // Rev 31 (the inhabited-land round + the GI cost round): the ground
+        // cover vocabulary gets NO occluder proxy either. Roads, crop rows,
+        // pier planks and boat hulls are 8-35 cm tall - their "shadows" are
+        // sub-pixel noise, and every proxy is one more primitive the SDF
+        // march scans per step (the march cost is linear in the primitive
+        // count, and the capture rig's frame budget proved primitive-bound).
+        else if (mesh.name.rfind("prop_road", 0) == 0
+                 || mesh.name.rfind("prop_crops", 0) == 0
+                 || mesh.name.rfind("prop_dock_plank", 0) == 0
+                 || mesh.name.rfind("prop_boat", 0) == 0)
+        {
+            gpu.proxyMode = MeshGpu::ProxyMode::None;
+        }
+        // Rev 25 (the shadow round): capture the mesh's local bbox for the
+        // SDF proxy pass. The registry already measured boundsMin/boundsMax
+        // from the same vertices, so no second scan runs here.
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            const float lo                 = mesh.boundsMin[axis];
+            const float hi                 = mesh.boundsMax[axis];
+            gpu.localBoundsCenter[axis]    = (lo + hi) * 0.5f;
+            gpu.halfExtents[axis]          = std::max((hi - lo) * 0.5f, 0.0f);
+        }
+        // The heightfield shadow grid: exactly one mesh exceeds 1 km on a
+        // side (the terrain patch - the water plane is also 8 km on the XZ
+        // axes, but it is FLAT, so its heights are constant and the grid is
+        // degenerate; the >1 km test on the Y extent as well keeps the fill
+        // terrain-only). Filled once - the terrain never moves.
+        const float maxHalf = std::max({gpu.halfExtents[0], gpu.halfExtents[1], gpu.halfExtents[2]});
+        if (!heightfieldShadow.filled && maxHalf > 1000.0f && gpu.halfExtents[1] > 4.0f)
+        {
+            try
+            {
+                fillHeightfieldImage(mesh, mesh.boundsMin, mesh.boundsMax);
+            } catch (const std::exception &error)
+            {
+                // A failed shadow grid degrades to the pre-rev-25 look (no
+                // terrain self-shadowing) - never a failed frame.
+                heightfieldShadow.filled = false;
+                if (runtimeLogger != nullptr)
+                {
+                    runtimeLogger->logMessage(
+                        LogLevel::Error, logPrefix + "heightfield shadow grid failed: " + error.what()
+                    );
+                }
+            }
+        }
         upload.target                 = &gpu.geometry;
         upload.usages                 = vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eIndexBuffer;
         batchedHandles.emplace_back(object.meshHandle, batch.size());
@@ -597,6 +860,189 @@ void RendererState::ensureMeshesUploaded()
     }
 }
 
+void RendererState::fillHeightfieldImage(
+    const SceneMeshDescriptor &mesh, const std::array<float, 3> &boundsMin,
+    const std::array<float, 3> &boundsMax
+)
+{
+    // The terrain heightfield shadow grid (rev 25): one R32_SFLOAT texel per
+    // grid cell over the mesh's XZ footprint, holding the normalized height
+    // of the grid vertex nearest that cell. The vertex lattice is a regular
+    // grid (TerrainField::meshGrid -> the bridge's subsample), so each
+    // vertex maps to exactly one texel by rounding its XZ onto the lattice.
+    // Heights normalize to [0, 1] across [heightMin, heightMax]; the
+    // consumers recover metres through the heightfieldParams pushed with
+    // the frame context.
+    constexpr std::uint32_t kGrid = 256;
+    const float sizeX  = std::max(boundsMax[0] - boundsMin[0], 1.0f);
+    const float sizeZ  = std::max(boundsMax[2] - boundsMin[2], 1.0f);
+    const float invX   = static_cast<float>(kGrid - 1) / sizeX;
+    const float invZ   = static_cast<float>(kGrid - 1) / sizeZ;
+    const float yLo    = boundsMin[1];
+    const float ySpan  = std::max(boundsMax[1] - boundsMin[1], 0.01f);
+
+    std::vector<float> grid(static_cast<std::size_t>(kGrid) * kGrid, 0.0f);
+    std::vector<std::uint32_t> seen(static_cast<std::size_t>(kGrid) * kGrid, 0u);
+    const std::size_t vertexCount = mesh.vertices.size() / 6;
+    for (std::size_t v = 0; v < vertexCount; ++v)
+    {
+        const float x = mesh.vertices[v * 6 + 0];
+        const float y = mesh.vertices[v * 6 + 1];
+        const float z = mesh.vertices[v * 6 + 2];
+        const std::int32_t gx = std::clamp(
+            static_cast<std::int32_t>(std::lround((x - boundsMin[0]) * invX)), 0, static_cast<std::int32_t>(kGrid - 1));
+        const std::int32_t gz = std::clamp(
+            static_cast<std::int32_t>(std::lround((z - boundsMin[2]) * invZ)), 0, static_cast<std::int32_t>(kGrid - 1));
+        const std::size_t cell = static_cast<std::size_t>(gz) * kGrid + static_cast<std::size_t>(gx);
+        // A sub-sampled lattice can drop several source rows into one cell;
+        // keep the MAXIMUM height - for sun shadows from above, the tallest
+        // terrain in a cell is the conservative occluder.
+        const float normalized = std::clamp((y - yLo) / ySpan, 0.0f, 1.0f);
+        if (seen[cell] == 0u || normalized > grid[cell])
+        {
+            grid[cell]     = normalized;
+            seen[cell]     = 1u;
+        }
+    }
+    // Unvisited cells (a lattice coarser than the grid leaves none, but a
+    // defensive zero = heightMin = the bbox floor keeps their rays clear).
+
+    vk::ImageCreateInfo imageInfo;
+    imageInfo.setImageType(vk::ImageType::e2D);
+    imageInfo.setFormat(vk::Format::eR32Sfloat);
+    imageInfo.setExtent(vk::Extent3D(kGrid, kGrid, 1));
+    imageInfo.setMipLevels(1);
+    imageInfo.setArrayLayers(1);
+    imageInfo.setSamples(vk::SampleCountFlagBits::e1);
+    imageInfo.setTiling(vk::ImageTiling::eOptimal);
+    imageInfo.setUsage(vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled);
+    imageInfo.setSharingMode(vk::SharingMode::eExclusive);
+    imageInfo.setInitialLayout(vk::ImageLayout::eUndefined);
+    heightfieldShadow.image = std::make_unique<vk::raii::Image>(*device, imageInfo);
+    const vk::MemoryRequirements requirements = heightfieldShadow.image->getMemoryRequirements();
+    vk::MemoryAllocateInfo allocateInfo;
+    allocateInfo.setAllocationSize(requirements.size);
+    allocateInfo.setMemoryTypeIndex(
+        findMemoryType(**physicalDevice, requirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)
+    );
+    heightfieldShadow.memory = std::make_unique<vk::raii::DeviceMemory>(*device, allocateInfo);
+    heightfieldShadow.image->bindMemory(*heightfieldShadow.memory, 0);
+
+    const vk::DeviceSize texelBytes = static_cast<vk::DeviceSize>(grid.size()) * sizeof(float);
+    vk::BufferCreateInfo stagingInfo;
+    stagingInfo.setSize(texelBytes);
+    stagingInfo.setUsage(vk::BufferUsageFlagBits::eTransferSrc);
+    stagingInfo.setSharingMode(vk::SharingMode::eExclusive);
+    vk::raii::Buffer stagingBuffer(*device, stagingInfo);
+    const vk::MemoryRequirements stagingRequirements = stagingBuffer.getMemoryRequirements();
+    vk::MemoryAllocateInfo stagingAllocate;
+    stagingAllocate.setAllocationSize(stagingRequirements.size);
+    stagingAllocate.setMemoryTypeIndex(
+        findMemoryType(
+            **physicalDevice, stagingRequirements.memoryTypeBits,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+        )
+    );
+    vk::raii::DeviceMemory stagingMemory(*device, stagingAllocate);
+    stagingBuffer.bindMemory(*stagingMemory, 0);
+    void *mapped = stagingMemory.mapMemory(0, stagingRequirements.size);
+    std::memcpy(mapped, grid.data(), static_cast<std::size_t>(texelBytes));
+    stagingMemory.unmapMemory();
+
+    vk::CommandBufferAllocateInfo commandAllocateInfo;
+    commandAllocateInfo.setCommandPool(**commandPool);
+    commandAllocateInfo.setLevel(vk::CommandBufferLevel::ePrimary);
+    commandAllocateInfo.setCommandBufferCount(1);
+    vk::raii::CommandBuffer setupBuffer = std::move(vk::raii::CommandBuffers(*device, commandAllocateInfo).front());
+    setupBuffer.begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+    vk::ImageMemoryBarrier toTransfer;
+    toTransfer.setImage(*heightfieldShadow.image);
+    toTransfer.setSrcAccessMask(vk::AccessFlagBits::eNone);
+    toTransfer.setDstAccessMask(vk::AccessFlagBits::eTransferWrite);
+    toTransfer.setOldLayout(vk::ImageLayout::eUndefined);
+    toTransfer.setNewLayout(vk::ImageLayout::eTransferDstOptimal);
+    toTransfer.setSubresourceRange(vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+    setupBuffer.pipelineBarrier(
+        vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags{},
+        {}, {}, toTransfer
+    );
+    vk::BufferImageCopy region;
+    region.setImageSubresource(vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1));
+    region.setImageExtent(vk::Extent3D(kGrid, kGrid, 1));
+    setupBuffer.copyBufferToImage(*stagingBuffer, *heightfieldShadow.image, vk::ImageLayout::eTransferDstOptimal, region);
+    vk::ImageMemoryBarrier toShaderRead = toTransfer;
+    toShaderRead.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite);
+    toShaderRead.setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+    toShaderRead.setOldLayout(vk::ImageLayout::eTransferDstOptimal);
+    toShaderRead.setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
+    setupBuffer.pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags{},
+        {}, {}, toShaderRead
+    );
+    setupBuffer.end();
+    vk::SubmitInfo submitInfo;
+    submitInfo.setCommandBuffers(*setupBuffer);
+    graphicsQueue.submit(submitInfo);
+    graphicsQueue.waitIdle();
+
+    vk::ImageViewCreateInfo viewInfo;
+    viewInfo.setImage(*heightfieldShadow.image);
+    viewInfo.setViewType(vk::ImageViewType::e2D);
+    viewInfo.setFormat(vk::Format::eR32Sfloat);
+    viewInfo.setSubresourceRange(vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+    heightfieldShadow.view = std::make_unique<vk::raii::ImageView>(*device, viewInfo);
+
+    heightfieldShadow.worldSize = sizeX; // the patch is square
+    heightfieldShadow.heightMin = yLo;
+    heightfieldShadow.heightMax = boundsMax[1];
+    heightfieldShadow.meshMin   = boundsMin;
+    heightfieldShadow.meshMax   = boundsMax;
+    heightfieldShadow.filled    = true;
+    if (runtimeLogger != nullptr)
+    {
+        runtimeLogger->logMessage(
+            LogLevel::Information,
+            logPrefix + "heightfield shadow grid filled (" + std::to_string(kGrid) + "x" + std::to_string(kGrid)
+                + ", world " + std::to_string(sizeX) + " m, heights " + std::to_string(yLo) + ".."
+                + std::to_string(boundsMax[1]) + " m)"
+        );
+    }
+}
+
+float RendererState::emissiveDaylightScale() const
+{
+    // Rev 29 (the lit-windows-at-night round): the cottages' window quads
+    // carried ONE authored emissive strength, so every midday capture
+    // printed flat glowing-yellow rectangles over the facades - lamps at
+    // noon. The scale rides the LIVE environment override: full glow at
+    // night (the moon branch) and under a low sun, fading to 0 as the sun
+    // climbs past ~22 degrees elevation. No override (the static-scene
+    // unit tests) keeps the authored value: the scale is 1.
+    if (!environmentOverrideLive)
+    {
+        return 1.0f;
+    }
+    if (environmentOverride.moonIntensity > 0.0f)
+    {
+        return 1.0f;
+    }
+    const std::array<float, 3> &dir = environmentOverride.sunDirection;
+    const float lengthSq = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+    if (lengthSq < 1e-8f)
+    {
+        // No live sun direction (the override drives fog/exposure only):
+        // keep the authored glow.
+        return 1.0f;
+    }
+    // The override's vector points TOWARDS the scene (the travel
+    // direction), so the elevation sine is the negated normalized y - the
+    // same convention the bridge's golden-hour curve uses.
+    const float elevation = -dir[1] / std::sqrt(lengthSq);
+    const float t = std::clamp((elevation - 0.08f) / 0.30f, 0.0f, 1.0f);
+    const float smooth = t * t * (3.0f - 2.0f * t);
+    return 1.0f - smooth;
+}
+
 SceneObject RendererState::sceneObjectFromDescriptor(
     SceneObjectDescriptor object
 )
@@ -620,6 +1066,12 @@ SceneObject RendererState::sceneObjectFromDescriptor(
     converted.textureSet       = std::move(object.textureSet);
     converted.uvScale          = object.uvScale;
     converted.meshHandle       = object.meshHandle;
+    converted.scale            = object.scale;
+    converted.transparency     = object.transparency >= scene_object_transparency::fully_transparent
+                                     ? SceneTransparency::FullyTransparent
+                                     : (object.transparency >= scene_object_transparency::semi_transparent
+                                            ? SceneTransparency::SemiTransparent
+                                            : SceneTransparency::Opaque);
     return converted;
 }
 
@@ -639,6 +1091,7 @@ SceneObjectDescriptor RendererState::sceneObjectToDescriptor(
     converted.textureSet       = object.textureSet;
     converted.uvScale          = object.uvScale;
     converted.meshHandle       = object.meshHandle;
+    converted.transparency     = static_cast<std::uint32_t>(object.transparency);
     return converted;
 }
 
@@ -938,11 +1391,8 @@ void RendererState::createArrayImages()
 {
     const std::size_t setCount = scene.textureSets.size();
     const std::uint32_t layers = static_cast<std::uint32_t>(std::max<std::size_t>(setCount, 1));
-    textureArrayMipLevels = anyTextureSetLoaded
-                              ? static_cast<std::uint32_t>(
-                                    std::floor(std::log2(std::max(loadedArrayExtent.width, loadedArrayExtent.height)))
-                                ) + 1
-                              : 1;
+    textureArrayMipLevels = 1; // TEMP PROBE E (uplift round): mip chain off
+    (void)anyTextureSetLoaded;
     arrayLayerCount       = layers;
 
     // Layout plan: UNDEFINED -> transfer dst (upload) -> transfer src/dst
@@ -1283,6 +1733,30 @@ void RendererState::uploadArrayLayersAndGenerateMips()
     }
 }
 
+void RendererState::rebuildSceneTextureArrays()
+{
+    // The runtime texture-set growth path (the graphics-uplift round). The
+    // refresh runs serialized on the frame path with the device idle (its
+    // own contract), so destroying and recreating the arrays here races
+    // nothing. Order matters: the descriptor set dies first (it references
+    // the old views), then the arrays rebuild through the same three phases
+    // createTextureArrays runs at init, then the set re-allocates and binds
+    // the new views. The material table's layer resolution happens later in
+    // the same refresh (uploadSceneData), against the map the merge filled.
+    sceneDescriptorSet.reset();
+    loadTextureSets();
+    createArrayImages();
+    uploadArrayLayersAndGenerateMips();
+    writeSceneDescriptors();
+    if (runtimeLogger != nullptr)
+    {
+        runtimeLogger->logMessage(
+            LogLevel::Information, logPrefix + "texture arrays rebuilt for " + std::to_string(scene.textureSets.size())
+                + " texture set(s) (runtime set growth)"
+        );
+    }
+}
+
 void RendererState::buildEnvironmentBuffer()
 {
     // Sky gradient from [scene.sky] (defaults to the flat sky_radiance) plus
@@ -1326,6 +1800,52 @@ void RendererState::buildEnvironmentBuffer()
     environment.sunDiskDirection = {-sunDirection[0], -sunDirection[1], -sunDirection[2], cosInner};
     environment.sunDiskRadiance
         = {sunColor[0] * diskRadiance, sunColor[1] * diskRadiance, sunColor[2] * diskRadiance, cosOuter};
+
+    // The runtime atmosphere override (the mod's environment state) merges
+    // OVER the static [scene] base: sky gradient, fog, moon and the sun's
+    // disk color/intensity when the override drives them (the sun's DIRECT
+    // light comes from the lighting provider; the override's sun intensity
+    // re-scales the DISK radiance so the visible sun and the direct light
+    // agree). Neutral defaults when nothing was pushed: clear air, no moon.
+    environment.fogDensityTint         = {0.0f, 0.7f, 0.7f, 0.7f};
+    environment.moonDirectionIntensity = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (environmentOverrideLive)
+    {
+        const SceneEnvironmentOverride &overrideState = environmentOverride;
+        environment.skyZenith                         = {overrideState.skyZenith[0], overrideState.skyZenith[1],
+                                                         overrideState.skyZenith[2], skyZenithBlendExponent};
+        environment.skyHorizon                        = {overrideState.skyHorizon[0], overrideState.skyHorizon[1],
+                                                         overrideState.skyHorizon[2], skyGroundBlendExponent};
+        environment.skyGround                         = {overrideState.skyGround[0], overrideState.skyGround[1],
+                                                         overrideState.skyGround[2], diskEnabled ? 1.0f : 0.0f};
+        environment.fogDensityTint = {overrideState.fogDensity, overrideState.fogTint[0], overrideState.fogTint[1],
+            overrideState.fogTint[2]};
+        environment.moonDirectionIntensity = {overrideState.moonDirection[0], overrideState.moonDirection[1],
+            overrideState.moonDirection[2], overrideState.moonIntensity};
+        if (overrideState.sunIntensity >= 0.0f)
+        {
+            const float overrideRadiance = solidAngle > 1e-8f ? overrideState.sunIntensity / solidAngle : 0.0f;
+            const std::array<float, 3> &overrideColor    = overrideState.sunColor;
+            environment.sunDiskRadiance = {overrideColor[0] * overrideRadiance, overrideColor[1] * overrideRadiance,
+                overrideColor[2] * overrideRadiance, cosOuter};
+        }
+        // rev 26: the live sun direction - the visible disk tracks the light
+        // the pbr module applies (a zero vector keeps the static direction).
+        // The override's vector points TOWARDS the scene (the travel
+        // direction), so the disk sits at its opposite, like the static
+        // path above.
+        const float overrideDirLength = std::sqrt(
+            overrideState.sunDirection[0] * overrideState.sunDirection[0]
+            + overrideState.sunDirection[1] * overrideState.sunDirection[1]
+            + overrideState.sunDirection[2] * overrideState.sunDirection[2]);
+        if (overrideDirLength > 1e-5f)
+        {
+            environment.sunDiskDirection = {
+                -overrideState.sunDirection[0] / overrideDirLength,
+                -overrideState.sunDirection[1] / overrideDirLength,
+                -overrideState.sunDirection[2] / overrideDirLength, cosInner};
+        }
+    }
 
     if (environmentBufferStorage.buffer == nullptr)
     {

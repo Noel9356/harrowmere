@@ -199,11 +199,46 @@ bool materializeMergedData(
     if (!errors.empty())
         return false;
 
+    // rev 34: subdirectory content trees (data/characters/ and any future
+    // content folder) ride the merge VERBATIM - the keyed .json merge above
+    // stays the top-level file contract, while whole directories the game
+    // reads directly (the character parts library, its recipes) copy
+    // recursively, core first and each package's tree over it (the same
+    // later-package-wins order the file merge uses).
+    const auto copyContentTree = [&errors](const std::filesystem::path &from, const std::filesystem::path &to) {
+        std::error_code copyEc;
+        std::filesystem::create_directories(to, copyEc);
+        std::filesystem::copy(from, to,
+            std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing, copyEc);
+        if (copyEc)
+        {
+            errors.push_back(DataError{from.string(), "", "cannot copy content tree: " + copyEc.message()});
+            return false;
+        }
+        return true;
+    };
+    {
+        for (const auto &entry : std::filesystem::directory_iterator(coreDataDirectory, ec))
+        {
+            if (ec)
+                break;
+            if (entry.is_directory() && !copyContentTree(entry.path(), outputDirectory / entry.path().filename()))
+                return false;
+        }
+    }
+
     for (const DataModPackage &package : packages)
     {
         const std::filesystem::path modData = package.directory / "data";
         if (!std::filesystem::is_directory(modData))
             continue;
+        for (const auto &entry : std::filesystem::directory_iterator(modData, ec))
+        {
+            if (ec)
+                break;
+            if (entry.is_directory() && !copyContentTree(entry.path(), outputDirectory / entry.path().filename()))
+                return false;
+        }
         std::vector<std::filesystem::path> overrides;
         for (const auto &entry : std::filesystem::directory_iterator(modData, ec))
         {

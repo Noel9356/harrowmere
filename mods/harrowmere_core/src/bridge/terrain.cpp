@@ -128,12 +128,40 @@ double TerrainField::heightAt(
     if (total_amp > 0.0)
         noise_sum /= total_amp; // normalize to [-1, 1]
 
-    // 4. Combine: baseline + noise * effective_amplitude. Clamped to ≥ 0 so
-    //    the land never dips below the heightfield datum (A-151 sea level = 0;
-    //    5.2.2's water plane sits at 0 and covers anything below — but
-    //    heightAt returns the LAND height, which is ≥ 0 by construction).
-    const double height = baseline + noise_sum * effective_amplitude;
-    return std::max(0.0, height);
+    // 4. Combine: baseline + noise * effective_amplitude. Clamped to the
+    //    basin floor (rev 24): the old clamp at exactly 0 flattened every
+    //    basin to the datum, and with the water plane below the datum the
+    //    world had NO visible water anywhere (the rev-24 world scan: minimum
+    //    0.00 across the whole patch). The floor now sits TERRAIN_BASIN_FLOOR
+    //    below the datum, so the noise's natural basins hold real lakes: the
+    //    water plane (A-151 datum - 0.3 m) shows wherever the ground falls
+    //    below it, the datum-level flats stay dry shore, and the scatter's
+    //    SEA_LEVEL rejection keeps props and cottages out of the water.
+    double height = baseline + noise_sum * effective_amplitude;
+    height = std::max(TERRAIN_BASIN_FLOOR_M, height);
+
+    // 5. Rev 25 (the drama round): the settlement pads. Inside SETTLEMENT
+    //    FLAT RADIUS the ground is exactly the pad's level; a smoothstep
+    //    band hands back to the field. Pads sit dry (the caller clamps the
+    //    base above the sea level) so a village never floats or drowns, and
+    //    the C2 blend keeps the A-149 gradient promise outside the band.
+    for (const SettlementFlat &flat : settlement_flats_)
+    {
+        const double dx  = x - flat.x;
+        const double dz  = z - flat.z;
+        const double dSq = dx * dx + dz * dz;
+        if (dSq >= TERRAIN_SETTLEMENT_BLEND_R2_M) // 92 m squared
+        {
+            continue;
+        }
+        const double d     = std::sqrt(dSq);
+        const double t     = d <= TERRAIN_SETTLEMENT_FLAT_RADIUS_M
+                                 ? 0.0
+                                 : smoothstep((d - TERRAIN_SETTLEMENT_FLAT_RADIUS_M)
+                                              / (TERRAIN_SETTLEMENT_BLEND_RADIUS_M - TERRAIN_SETTLEMENT_FLAT_RADIUS_M));
+        height = flat.baseHeight + (height - flat.baseHeight) * t;
+    }
+    return height;
 }
 
 // ---- mesh grid (the bridge's ground claim) --------------------------------
@@ -264,15 +292,19 @@ double TerrainField::climateNoiseAmplitudeM(
     case world::Climate::MOUNTAIN:
         return TERRAIN_INLAND_MAX_AMPLITUDE_M; // 120 m (A-147.d)
     case world::Climate::FOREST:
-        return TERRAIN_INLAND_MAX_AMPLITUDE_M * 0.4; // 48 m
+        // Rev 25 (the drama round): the old caps (48/24/18 m) drew a plain
+        // the camera could not tell from a table top - the owner's "this
+        // scene is boring" verdict. The caps rise so the rolling hills
+        // actually read (and feed the rev-25 heightfield shadows).
+        return TERRAIN_INLAND_MAX_AMPLITUDE_M * 0.62; // 74 m
     case world::Climate::SWAMP:
-        return TERRAIN_INLAND_MAX_AMPLITUDE_M * 0.15; // 18 m
+        return TERRAIN_INLAND_MAX_AMPLITUDE_M * 0.22; // 26 m
     case world::Climate::TEMPERATE:
-        return TERRAIN_INLAND_MAX_AMPLITUDE_M * 0.2; // 24 m
+        return TERRAIN_INLAND_MAX_AMPLITUDE_M * 0.42; // 50 m
     case world::Climate::COASTAL:
         return TERRAIN_COASTAL_CLAMP_M; // 8 m (A-147.e)
     default:
-        return TERRAIN_INLAND_MAX_AMPLITUDE_M * 0.2;
+        return TERRAIN_INLAND_MAX_AMPLITUDE_M * 0.42;
     }
 }
 

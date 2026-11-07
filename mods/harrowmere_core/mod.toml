@@ -24,10 +24,26 @@ description = "Harrowmere's authoritative simulation: world model, characters, j
 # demand alone leaves the pass idle. The mod code keeps its degrade-if-absent
 # guards (the probe, the sink's null checks) so a build without the provider
 # still runs the sim; the RUN, not the code, pins the visual contract.
-capabilities = ["logging", "scene", "input", "lighting", "pbr_direct_diffuse", "screenshot"]
+#
+# gi_screen_world_diffuse (rev 30; renamed gi_traced_diffuse -> gi_sdf_hemisphere_diffuse
+# in rev 31 - the owner rejected the generic name - and -> gi_screen_world_diffuse in
+# rev 33: since rev 32 every gather ray resolves in TWO spaces, so the rev-31 name
+# described only the world-stage fallback): the per-pixel two-space diffuse GI
+# gather (screen-space depth march first, exact analytic SDF second - Lumen's
+# trace ordering over the exact field). Demanded like the direct pass's marker so
+# the indirect radiance target exists and the composite stops carrying the full
+# analytic ambient (it drops to a quarter share when the GI term is present - see
+# scene_composite.frag).
+capabilities = ["logging", "scene", "input", "lighting", "pbr_direct_diffuse", "gi_screen_world_diffuse", "character_customisation", "screenshot"]
+# character_customisation (rev 34): the modular-character service - the
+# parts library, the compatibility-rule registry, the validated attachment-
+# tree assemblies (the owner's architecture document, first implementation
+# test). Demanded like the lighting markers: the kernel's required-capability
+# closure pins the provider, the mod acquires the pointer and installs its
+# parsed parts library at start.
 provides = ["harrowmere.core"]         # native mods PROVIDE through mod.toml; the compiled manifest must agree
 optional_capabilities = ["physics", "audio", "animation", "asset"]  # degrade-if-absent is the contract (§4.0)
 permissions = ["filesystem.write"]     # saves (task 7.1) write into the user's save directory
-config_keys = ["harrowmere.tick_rate", "harrowmere.time_scale", "harrowmere.autosave_game_hours", "harrowmere.seed"]
+config_keys = ["harrowmere.tick_rate", "harrowmere.time_scale", "harrowmere.autosave_game_hours", "harrowmere.seed", "harrowmere.time_of_day_game_hours", "harrowmere.weather_kind", "harrowmere.capture_scenario"]
 requires = []
 scene = "scene.toml"                   # harrowmere_core claims the world - the only claimant in the runtime (one-world rule)

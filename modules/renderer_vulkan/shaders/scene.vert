@@ -47,15 +47,23 @@ void main()
 {
     const vec4 world = object.model * vec4(inPosition, 1.0);
     outWorldPosition = world.xyz;
-    // Axis-aligned scaling and Y rotation preserve direction after
-    // normalization; spheres use a uniform radius, so the normal stays exact.
-    outWorldNormal = normalize(mat3(object.model) * inNormal);
+    // The exact inverse-transpose normal for the model's translate * rotY *
+    // diag(scale) shape: with column scales `axisScales` extracted below,
+    // mat3(model) * (n / axisScales^2) equals R * diag(1/scale) * n - the
+    // correct transformed normal for ANY normal direction under axis-aligned
+    // scaling (rev 34: the character-assembly parts instance one vocabulary
+    // at per-part proportions). Division by (1,1,1) is a no-op, and for the
+    // pre-34 cases - axis-aligned box normals, uniformly scaled spheres -
+    // the normalized result is bit-identical to the old direction-preserving
+    // claim (an axis-aligned normal stays on its axis; a sphere's uniform
+    // radius cancels).
+    const vec3 axisScales = vec3(length(object.model[0].xyz), length(object.model[1].xyz),
+                                 length(object.model[2].xyz));
+    outWorldNormal = normalize(mat3(object.model) * (inNormal / (axisScales * axisScales)));
     // Local position in METERS: the model's column lengths are the axis
     // scales (position + rotY + scale model), so unitLocal * size equals the
     // rotated-back local point the SDF tracing passes reconstruct from world
     // positions - both sides of the material system measure UVs the same way.
-    const vec3 axisScales = vec3(length(object.model[0].xyz), length(object.model[1].xyz),
-                                 length(object.model[2].xyz));
     outLocalPosition = inPosition * axisScales;
     outLocalNormal = inNormal;
     outHalfExtents = axisScales;

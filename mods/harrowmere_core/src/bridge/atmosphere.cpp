@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstdint>
 #include <numbers>
+#include <string_view>
 
 namespace harrowmere::bridge
 {
@@ -150,8 +151,41 @@ std::array<float, 3> skyTintFor(
     double dayPhase01, AtmosphereSeason season
 ) noexcept
 {
-    const auto [lo, hi, t]    = nearestAnchors(dayPhase01);
-    std::array<float, 3> tint = lerpColor(lo->color, hi->color, t);
+    const auto [lo, hi, tRaw] = nearestAnchors(dayPhase01);
+    // Rev 25 shaped the blend t^0.6 toward the NEXT anchor everywhere - the
+    // mornings reached noon blue fast (right), but the afternoons hit the
+    // dusk reds just as fast: the 15:45 coast and 16:30 frontier frames read
+    // 80-90% sunset-mauve hours before any real golden hour. Rev 26 shapes
+    // PER SEGMENT: mornings still reach blue early (t^0.6), the afternoon
+    // LINGERS on the noon blues and only falls into the ambers in the last
+    // third before the dusk anchor (t^2.0), the evening fall to night eases
+    // (t^0.9). The pinned anchor colors and phases are untouched - only the
+    // interpolation weight changes, so A-155's row stays as pinned.
+    const bool afternoon = lo->name != nullptr && hi->name != nullptr
+        && std::string_view{lo->name} == "noon" && std::string_view{hi->name} == "dusk";
+    const bool evening = lo->name != nullptr && hi->name != nullptr
+        && std::string_view{lo->name} == "dusk";
+    const double exponent = afternoon ? 2.4 : (evening ? 0.9 : 0.6);
+    const double t        = std::pow(std::clamp(tRaw, 0.0f, 1.0f), exponent);
+    // Rev 29 (the anti-mauve transit): the afternoon segment no longer
+    // lerps noon-blue to dusk-red in straight RGB - the mid-leg of that
+    // lerp is a low-chroma violet, and the 16.5h frontier capture printed
+    // exactly it as one flat mauve sheet. The transit now passes through a
+    // warm-white midpoint (the sky's own golden hour): blue holds into the
+    // early leg, warms through amber, and lands on the pinned dusk red. The
+    // pinned anchor colors and phases are untouched - A-155's row stays as
+    // pinned; only the between-anchors path changes, like the rev-25/26
+    // blend shaping before it.
+    std::array<float, 3> tint;
+    if (afternoon)
+    {
+        constexpr std::array<float, 3> warmMid{1.0f, 0.74f, 0.45f};
+        tint = t < 0.5 ? lerpColor(lo->color, warmMid, static_cast<float>(t * 2.0))
+                       : lerpColor(warmMid, hi->color, static_cast<float>((t - 0.5) * 2.0));
+    } else
+    {
+        tint = lerpColor(lo->color, hi->color, t);
+    }
 
     // Season modulation (winter desaturates, autumn warms). The season
     // index maps to SEASON_TINTS (0..3: spring, summer, autumn, winter).
@@ -183,7 +217,12 @@ FogSample fogFor(
     switch (weather)
     {
     case AtmosphereWeather::CLEAR:
-        return {0.0f, {0.7f, 0.7f, 0.7f}};
+        // Clear air still carries a light aerial perspective (rev 22): the
+        // density 0 of the uplift round left the far terrain silhouetting
+        // hard against the sky (the horizon seam in every uplift capture).
+        // 0.17 half-fades near ~5 km and saturates past ~10 km - the seam
+        // becomes depth. The tint leans warm-pale to meet the horizon band.
+        return {0.17f, {0.80f, 0.80f, 0.82f}};
     case AtmosphereWeather::RAIN:
         // Rain raises density, desaturates slightly.
         return {0.35f, {0.55f, 0.55f, 0.58f}};
@@ -237,7 +276,11 @@ AtmosphereSample sampleAtmosphere(
 
     const auto fog = fogFor(input.weather);
     s.fogDensity   = fog.density;
-    s.fogTint      = fog.tint;
+    // The haze follows the daylight (rev 22): a full-strength grey tint
+    // would glow against the night sky, so the tint scales down to 30%
+    // at midnight and rides full at noon.
+    const float dayLift = 0.30f + 0.70f * std::clamp(s.sunIntensity, 0.0f, 1.0f);
+    s.fogTint      = {fog.tint[0] * dayLift, fog.tint[1] * dayLift, fog.tint[2] * dayLift};
 
     s.exposureTarget = exposureFor(input.dayPhase01);
 

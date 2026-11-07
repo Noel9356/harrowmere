@@ -212,6 +212,13 @@ void RendererState::recordGeometryPass(
         // sin/cos and the two hash lookups this loop used to pay are gone.
         // The push constants themselves stay per-frame: they name THIS draw.
         const ObjectDrawCache &cached = objectDrawCache[objectIndex];
+        // Rev 31 (the layered depth buffer): opaque objects only. The semi-
+        // transparent class draws in recordTransparencyPass; the fully
+        // transparent class draws in neither pass yet.
+        if (cached.transparency != SceneTransparency::Opaque)
+        {
+            continue;
+        }
         const bool isMeshObject       = object.type == SceneObjectType::Mesh;
         struct ObjectPush
         {
@@ -228,10 +235,10 @@ void RendererState::recordGeometryPass(
                 static_cast<float>(cached.albedoLayer),
                 object.uvScale,
                 static_cast<float>(static_cast<std::uint32_t>(object.type))},
-            {isMeshObject ? object.size[0] : 0.0f,
-                isMeshObject ? object.size[1] : 0.0f,
-                isMeshObject ? object.size[2] : 0.0f,
-                0.0f}
+            {isMeshObject ? object.size[0] * object.scale[0] : 0.0f,
+                isMeshObject ? object.size[1] * object.scale[1] : 0.0f,
+                isMeshObject ? object.size[2] * object.scale[2] : 0.0f,
+                cached.waterFlag}
         };
         commandBuffer.pushConstants(
             **scenePipelineLayout,
@@ -262,6 +269,199 @@ void RendererState::recordGeometryPass(
     commandBuffer.endRendering();
 }
 
+void RendererState::recordTransparencyPass(
+    vk::raii::CommandBuffer &commandBuffer, const FrameRenderContext &frameContext
+)
+{
+    // Rev 31 (the layered depth buffer). The transparency layer's render
+    // pass: every SemiTransparent object draws into the layer's three
+    // attachments (albedo+roughness, normal+alpha, NDC depth-as-color) with
+    // the OPAQUE depth attachment bound for the depth TEST (write off) - a
+    // transparent surface behind a wall must not blend, while the opaque
+    // depth stays the lighting consumers' ground truth. The layer resolves
+    // the nearest transparent surface per pixel through the shader's own
+    // draws (the plane objects draw front-to-back in registry order; the
+    // first citizen is one water plane, so no depth ordering is needed yet).
+    if (sceneTransparentPipeline == nullptr)
+    {
+        return;
+    }
+    bool anyTransparent = false;
+    for (const ObjectDrawCache &cached : objectDrawCache)
+    {
+        if (cached.transparency == SceneTransparency::SemiTransparent)
+        {
+            anyTransparent = true;
+            break;
+        }
+    }
+    if (!anyTransparent)
+    {
+        return; // the common indoor / chamber capture: the layer stays empty
+    }
+
+    // The opaque geometry pass's depth writes must be visible to this pass's
+    // early fragment tests. The G-buffer hand-off above covers shader reads;
+    // depth-attachment reads need their own scope (late-frag write -> early-
+    // frag read).
+    vk::ImageMemoryBarrier2 depthForTest;
+    depthForTest.setSrcStageMask(vk::PipelineStageFlagBits2::eLateFragmentTests);
+    depthForTest.setSrcAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite);
+    depthForTest.setDstStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests);
+    depthForTest.setDstAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentRead);
+    depthForTest.setOldLayout(vk::ImageLayout::eGeneral);
+    depthForTest.setNewLayout(vk::ImageLayout::eGeneral);
+    depthForTest.setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
+    depthForTest.setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
+    depthForTest.setImage(**depthImage.image);
+    depthForTest.setSubresourceRange(vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1));
+    vk::DependencyInfo testDependency;
+    testDependency.setImageMemoryBarriers(depthForTest);
+    commandBuffer.pipelineBarrier2(testDependency);
+
+    // The three layer attachments, cleared to "no transparent surface"
+    // (albedo 0 / alpha 0 / depth 1.0 - the composite's transDepth >= opaque
+    // depth test then treats the pixel as transparent-free).
+    std::array<vk::ClearValue, 3> clearValues;
+    clearValues[0].setColor(vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}));
+    clearValues[1].setColor(vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}));
+    clearValues[2].setColor(vk::ClearColorValue(std::array<float, 4>{1.0f, 0.0f, 0.0f, 0.0f}));
+
+    std::array<vk::RenderingAttachmentInfo, 3> colorAttachments;
+    const vk::ImageView attachmentViews[3]
+        = {frameContext.transAlbedoView, frameContext.transNormalView, frameContext.transDepthView};
+    for (std::size_t index = 0; index < 3; ++index)
+    {
+        colorAttachments[index].setImageView(attachmentViews[index]);
+        colorAttachments[index].setImageLayout(vk::ImageLayout::eGeneral);
+        colorAttachments[index].setLoadOp(vk::AttachmentLoadOp::eClear);
+        colorAttachments[index].setStoreOp(vk::AttachmentStoreOp::eStore);
+        colorAttachments[index].setClearValue(clearValues[index]);
+    }
+
+    // The OPAQUE depth attachment: load (layer 0 is complete), no store (the
+    // pass never writes depth - the pipeline's depth write is off).
+    vk::RenderingAttachmentInfo depthAttachment;
+    depthAttachment.setImageView(frameContext.depthView);
+    depthAttachment.setImageLayout(vk::ImageLayout::eGeneral);
+    depthAttachment.setLoadOp(vk::AttachmentLoadOp::eLoad);
+    depthAttachment.setStoreOp(vk::AttachmentStoreOp::eNone);
+
+    vk::RenderingInfo renderingInfo;
+    renderingInfo.setRenderArea(vk::Rect2D(vk::Offset2D(0, 0), frameContext.extent));
+    renderingInfo.setLayerCount(1);
+    renderingInfo.setColorAttachmentCount(static_cast<std::uint32_t>(colorAttachments.size()));
+    renderingInfo.setPColorAttachments(colorAttachments.data());
+    renderingInfo.setPDepthAttachment(&depthAttachment);
+
+    commandBuffer.beginRendering(renderingInfo);
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, **sceneTransparentPipeline);
+    const vk::Viewport viewport(
+        0.0f,
+        0.0f,
+        static_cast<float>(frameContext.extent.width),
+        static_cast<float>(frameContext.extent.height),
+        0.0f,
+        1.0f
+    );
+    commandBuffer.setViewport(0, viewport);
+    const vk::Rect2D scissor(vk::Offset2D(0, 0), frameContext.extent);
+    commandBuffer.setScissor(0, scissor);
+    commandBuffer.bindDescriptorSets(
+        vk::PipelineBindPoint::eGraphics, **scenePipelineLayout, 0, **sceneDescriptorSet, {}
+    );
+
+    const GeometryBuffer *currentMesh = nullptr;
+    for (std::size_t objectIndex = 0; objectIndex < activeObjects.size(); ++objectIndex)
+    {
+        const SceneObject &object = activeObjects[objectIndex];
+        const ObjectDrawCache &cached = objectDrawCache[objectIndex];
+        if (cached.transparency != SceneTransparency::SemiTransparent)
+        {
+            continue;
+        }
+        const bool isMeshObject = object.type == SceneObjectType::Mesh;
+        // The push block mirrors the geometry pass's; metallicEmissiveStrength.z
+        // carries the object's authored opacity multiplier (1.0 for water -
+        // the composite's depth-delta absorption rules the per-pixel result).
+        struct ObjectPush
+        {
+            Mat4 model;
+            std::array<float, 4> albedoRoughness;
+            std::array<float, 4> metallicEmissiveStrength;
+            std::array<float, 4> materialLayers;
+            std::array<float, 4> meshBox;
+        } pushValue{
+            cached.model,
+            {object.albedo[0], object.albedo[1], object.albedo[2], object.roughness},
+            {object.metallic, object.emissiveStrength, 1.0f, 0.0f},
+            {static_cast<float>(cached.albedoLayer),
+                static_cast<float>(cached.albedoLayer),
+                object.uvScale,
+                static_cast<float>(static_cast<std::uint32_t>(object.type))},
+            {isMeshObject ? object.size[0] * object.scale[0] : 0.0f,
+                isMeshObject ? object.size[1] * object.scale[1] : 0.0f,
+                isMeshObject ? object.size[2] * object.scale[2] : 0.0f,
+                cached.waterFlag}
+        };
+        commandBuffer.pushConstants(
+            **scenePipelineLayout,
+            vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+            0,
+            sizeof(pushValue),
+            &pushValue
+        );
+
+        const GeometryBuffer *mesh = cached.mesh;
+        if (mesh == nullptr && !isMeshObject)
+        {
+            mesh = object.type == SceneObjectType::Sphere ? &sphereMesh : &boxMesh;
+        }
+        if (mesh != nullptr)
+        {
+            if (currentMesh != mesh)
+            {
+                commandBuffer.bindVertexBuffers(0, **mesh->buffer, {0});
+                commandBuffer.bindIndexBuffer(
+                    **mesh->buffer, static_cast<vk::DeviceSize>(mesh->indexOffsetBytes), vk::IndexType::eUint32
+                );
+                currentMesh = mesh;
+            }
+            commandBuffer.drawIndexed(mesh->indexCount, 1, 0, 0, 0);
+        }
+    }
+    commandBuffer.endRendering();
+}
+
+void RendererState::recordTransparencyHandoffBarrier(
+    vk::raii::CommandBuffer &commandBuffer
+)
+{
+    // The transparency layer's color writes -> the composite fragment's
+    // sampled reads. The pass is often skipped (no transparent objects), but
+    // an empty barrier is legal and the composite binds the layer
+    // unconditionally - keep the hand-off unconditional for one code path.
+    std::array<vk::ImageMemoryBarrier2, 3> barriers;
+    const vk::Image images[3] = {
+        **transAlbedoImage.image, **transNormalImage.image, **transDepthImage.image};
+    for (std::size_t index = 0; index < 3; ++index)
+    {
+        barriers[index].setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput);
+        barriers[index].setSrcAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite);
+        barriers[index].setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader);
+        barriers[index].setDstAccessMask(vk::AccessFlagBits2::eShaderRead);
+        barriers[index].setOldLayout(vk::ImageLayout::eGeneral);
+        barriers[index].setNewLayout(vk::ImageLayout::eGeneral);
+        barriers[index].setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
+        barriers[index].setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
+        barriers[index].setImage(images[index]);
+        barriers[index].setSubresourceRange(vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+    }
+    vk::DependencyInfo dependency;
+    dependency.setImageMemoryBarriers(barriers);
+    commandBuffer.pipelineBarrier2(dependency);
+}
+
 void RendererState::recordFrameStartBarrier(
     vk::raii::CommandBuffer &commandBuffer
 )
@@ -271,10 +471,16 @@ void RendererState::recordFrameStartBarrier(
     // record path.
     std::vector<vk::ImageMemoryBarrier2> &barriers = frameStartBarriers;
     barriers.clear();
-    const vk::Image frameImages[6]
+    // Rev 31: the transparency layer's images join the frame-start hazard
+    // set - the previous frame's composite fragments read them, this frame's
+    // transparency pass writes them.
+    const vk::Image frameImages[9]
         = {**emissiveImage.image,
             **albedoImage.image,
             **normalImage.image,
+            **transAlbedoImage.image,
+            **transNormalImage.image,
+            **transDepthImage.image,
             hasDirectRadianceTarget ? **directRadianceImage.image : vk::Image{},
             hasIndirectDiffuseTarget ? **indirectRadianceImage.image : vk::Image{},
             hasIndirectSpecularTarget ? **indirectSpecularImage.image : vk::Image{}};
@@ -692,19 +898,40 @@ void RendererState::recordFrameCommands(
         .normalView           = *normalImage.view,
         .emissiveView         = *emissiveImage.view,
         .depthView            = *depthImage.view,
+        // Rev 31 (the layered depth buffer): the transparency layer's views.
+        .transAlbedoView      = *transAlbedoImage.view,
+        .transNormalView      = *transNormalImage.view,
+        .transDepthView       = *transDepthImage.view,
         .directRadianceView   = hasDirectRadianceTarget ? *directRadianceImage.view : *dummyImage.view,
         .indirectRadianceView = hasIndirectDiffuseTarget ? *indirectRadianceImage.view : *dummyImage.view,
+        // The image handle the temporal techniques copy from (their history
+        // mirror is a vkCmdCopyImage, which takes images, not views). The
+        // dummy stands in when no technique declared the target.
+        .indirectRadianceImage = hasIndirectDiffuseTarget ? **indirectRadianceImage.image : **dummyImage.image,
         .indirectSpecularView = hasIndirectSpecularTarget ? *indirectSpecularImage.view : *dummyImage.view,
         .primitivesBuffer     = **primitivesBuffer.buffer,
-        .primitiveCount       = static_cast<std::uint32_t>(activeObjects.size()),
+        // Rev 25: the uploaded PRIMITIVE count, not the object count - the
+        // occluder proxies appended by uploadSceneData live past the object
+        // rows, and the shader loops bound their scans with this number.
+        // Using activeObjects.size() here silently dropped every proxy from
+        // the SDF (the shadow round's first capture run: trees still
+        // shadowless).
+        .primitiveCount       = primitiveUploadCount,
         .materialsBuffer      = **materialsBuffer.buffer,
         .albedoArrayView      = *albedoArrayImage.view,
         .dataArrayView        = *dataArrayImage.view,
         .environmentBuffer    = **environmentBufferStorage.buffer,
         .cameraBuffer         = **cameraBufferStorage.buffer,
+        .heightfieldView      = heightfieldShadow.filled && heightfieldShadow.view != nullptr
+                                    ? *heightfieldShadow.view
+                                    : *dummyImage.view,
+        .heightfieldParams    = {heightfieldShadow.worldSize, heightfieldShadow.heightMin,
+                                    heightfieldShadow.heightMax, heightfieldShadow.filled ? 1.0f : 0.0f},
         .cameraNearPlane      = scene.camera.nearPlane,
         .cameraFarPlane       = scene.camera.farPlane,
-        .cameraPosition       = {cameraData.position[0], cameraData.position[1], cameraData.position[2]}
+        .cameraPosition       = {cameraData.position[0], cameraData.position[1], cameraData.position[2]},
+        .cameraViewProjection = cameraData.viewProjection,
+        .cameraInverseViewProjection = cameraData.inverseViewProjection
     };
 
     recordGeometryPass(commandBuffer, frameContext);
@@ -728,6 +955,13 @@ void RendererState::recordFrameCommands(
     // G-buffer hand-off (all frame images stay in GENERAL, so this is an
     // access dependency, not a layout transition).
     recordGBufferHandoffBarrier(commandBuffer);
+
+    // Rev 31 (the layered depth buffer): the transparency pass runs AFTER the
+    // opaque geometry (it depth-tests against layer 0) and BEFORE the
+    // lighting techniques (they stay on the opaque G-buffer; the layer's
+    // composite read is barriered below).
+    recordTransparencyPass(commandBuffer, frameContext);
+    recordTransparencyHandoffBarrier(commandBuffer);
 
     bool firstTechnique = true;
     for (const auto &technique : lightingTechniques)
@@ -967,6 +1201,7 @@ void RendererState::renderFrame(
     // Scene edits (scripts, physics, animation) only flagged the registry
     // dirty; the one re-sync per dirty frame happens here, on the serialized
     // frame path with the device idle - the coherent host writes race nothing.
+    pullEnvironmentOverride();
     if (sceneRegistryDirty)
     {
         sceneRegistryDirty = false;

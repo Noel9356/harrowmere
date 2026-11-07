@@ -1,0 +1,9 @@
+"park_dirt" texture set (Color.png from the Diffuse map, Roughness.png from
+the Rough map, both 1k jpg downscaled to PNG).
+
+Source: PolyHaven (https://polyhaven.com/a/park_dirt), PolyHaven TLX content
+released under Creative Commons Zero (CC0 1.0 Universal -
+https://creativecommons.org/publicdomain/zero/1.0/). Downloaded 2026-11-06
+for the rev-27 market-square ground (A-205): the plaza previously tinted the
+grass photo, which capped its albedo at pale sand and - before the A-204
+normal fix - rendered as mud.

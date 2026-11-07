@@ -1,0 +1,567 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// Ray-traced diffuse GI (the two-space gather pass): STRATIFIED
+// cosine-distributed hemisphere rays per pixel, each ray resolved in TWO
+// spaces exactly like Lumen - marched through the SCREEN-SPACE depth buffer
+// first (the rasterized truth: meshes and analytic primitives at per-pixel
+// fidelity), with the EXACT analytic scene SDF as the world-space fallback -
+// hit points relit with their textured materials, one screen-space second
+// bounce, and a reprojection-validated temporal accumulation.
+//
+// Rev 33 (the research round): every stage of the pass is CONFIGURABLE, each
+// knob mapped onto the control Unreal exposes for the same stage (the
+// mapping was verified against Epic's documentation and the SIGGRAPH 2022
+// Lumen course notes - see README.md and FINDINGS.md round 33):
+//   screen_trace            ~ r.Lumen.ScreenProbeGather.ScreenTraces (the
+//                             Post Process "Screen Traces" checkbox)
+//   screen_steps            ~ r.Lumen.ScreenProbeGather.ScreenTraces.
+//                             HZBTraversal.MaxIterations (trace budget)
+//   screen_max_distance     ~ Post Process "Max Trace Distance", screen half
+//   screen_thickness        ~ the linear-step thickness tolerance (the leak
+//                             guard Lumen's HZB traversal replaces)
+//   temporal_max_frames     ~ r.Lumen.ScreenProbeGather.Temporal.
+//                             MaxFramesAccumulated (default 10; ours 64)
+//   temporal_normal_rejection ~ Lumen's depth+normal history rejection
+//   short_range_ao_radius   ~ r.Lumen.ScreenProbeGather.ShortRangeAO (the
+//                             16 px "shortest range occlusion" band)
+//   rays_per_pixel          ~ the final-gather quality dial (Lumen tunes the
+//                             probe octahedron resolution instead)
+//   intensity / sky_miss_scale ~ the output-shaping pair
+//
+// The pass fills the renderer's indirectRadiance target with the unit the
+// composite expects: irradiance / pi (the composite multiplies albedo into
+// it). With cosine-weighted sampling the estimator for E/pi is simply the
+// mean of the incoming radiance over the rays - no extra weights.
+//
+// Why this shape mirrors Lumen (and where it deliberately differs):
+//   Lumen surface cache  -> the analytic relight (relight_common.glsl): every
+//                           hit point is shaded with the SAME textured direct
+//                           lighting the G-buffer pass rasterizes with. This
+//                           is Lumen's "hit lighting" material answer, not
+//                           its card-based surface cache - our field IS the
+//                           geometry, so no card capture exists to replace.
+//   Lumen final gather   -> the cosine hemisphere gather, resolved in TWO
+//                           spaces (rev 32). DELIBERATE DIFFERENCE: Lumen
+//                           gathers at 1/16-resolution screen PROBES and
+//                           interpolates (probes exist to amortize tracing
+//                           across pixels); we gather per pixel and spend
+//                           the budget on rays instead. Same ordering, same
+//                           reason: indirect shadows at pixel fidelity.
+//   Lumen screen trace   -> the screen march below: linear exponential
+//                           strides + bisect. Lumen walks hierarchical-Z
+//                           mips instead (linear steps skip thin occluders);
+//                           our thickness tolerance plays the same leak-guard
+//                           role at this buffer's resolution.
+//   Lumen radiance cache -> the previous frame's gathered irradiance sampled
+//                           at the hit point's reprojection (a two-bounce
+//                           approximation that costs one texture fetch).
+//                           Lumen's two-level probe hierarchy is the full
+//                           answer; the one-fetch memory is what a per-pixel
+//                           gather can afford.
+//   Temporal accumulation -> reprojection-validated history blend, depth +
+//                           normal rejection, a running-average ramp CAPPED
+//                           by temporal_max_frames (Lumen's
+//                           MaxFramesAccumulated: an uncapped ramp hardens
+//                           into a frozen average that stops tracking the
+//                           scene).
+//   Short-range AO       -> the post-temporal screen-space occlusion ring
+//                           (Lumen applies its shortest-range occlusion
+//                           AFTER the temporal filter so it carries no lag).
+//
+// Rev 31 (the owner's "this GI is noisy"): the estimator went from one
+// ray to giPush.params.z STRATIFIED rays per pixel - each ray's two jitter
+// draws get their own golden-ratio-rotated offset, decorrelating the samples
+// inside one pixel the way the temporal ramp decorrelates frames - and every
+// ray's radiance passes the indirect clamp (params.w): rare hits on the
+// emissive panel or a lamp no longer print as un-filterable specks. The
+// frame-0 guard stops the blend from mixing the fresh estimate into an
+// UNDEFINED history image (the rev-30 first-frame initialization bug).
+//
+// The alpha channel of the output carries the pixel's view depth (distance
+// camera -> shaded point). The reprojection confidence for BOTH the pixel's
+// own history and the second-bounce fetch compares that stored depth against
+// the distance the reprojection predicts, which disocclusions and silhouettes
+// fail and flat surfaces pass.
+
+// The flat-albedo relight switch: the capture reference rasterizer crashes
+// executing arrayed texture fetches inside compute kernels (see
+// materials_common.glsl, ENGINE_RELIGHT_FLAT_ALBEDO). The bounce albedo is
+// the primitive's palette tint + ALU variation; the GI chamber's flat
+// materials are exact under it.
+#define ENGINE_RELIGHT_FLAT_ALBEDO
+#include "scene_common.glsl"
+#include "relight_common.glsl"
+#include "environment_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 1, binding = 0) uniform sampler2D albedoSampler; // rgb albedo, a roughness (unused: relight re-derives)
+layout(set = 1, binding = 1) uniform sampler2D normalSampler; // rgb world normal, a metallic
+layout(set = 1, binding = 2) uniform sampler2D depthSampler;
+layout(set = 1, binding = 3, rgba16f) uniform restrict writeonly image2D giImage;
+layout(set = 1, binding = 4) uniform sampler2D historySampler; // rgb last frame's irradiance/pi, a view depth
+
+// Last frame's camera (the reprojection source). The pass uploads it from
+// its own host copy each record BEFORE the dispatch, then stores the current
+// camera after the dispatch - the shader therefore always reprojects with
+// the previous frame's matrices, never the current ones.
+layout(std140, set = 0, binding = 7) uniform PreviousCameraUniform
+{
+    mat4 viewProjection;
+    mat4 inverseViewProjection;
+    vec4 cameraPosition;
+} previousCamera;
+
+layout(push_constant) uniform GiPush
+{
+    layout(offset = 0) uvec4 counts;   // x primitive count, y frame index, z world march steps, w second bounce (0/1)
+    layout(offset = 16) vec4 params;   // x max trace distance, y temporal alpha floor, z rays per pixel, w indirect clamp
+    layout(offset = 32) vec4 params2;  // x screen strides, y screen thickness (m), z screen march bound (m), w screen bisect steps
+    layout(offset = 48) uvec4 flags;   // x screen traces 0/1, y animated jitter 0/1, z temporal normal rejection 0/1, w short-range AO radius (px)
+    layout(offset = 64) vec4 params3;  // x temporal ramp cap (frames), y short-range AO strength, z intensity, w sky-miss scale
+    layout(offset = 80) vec4 params4;  // x spatial filter radius (px; the denoise dispatch reads this), y-z-w reserved
+} giPush;
+
+// Interleaved gradient noise (Jimenez): the per-pixel, per-frame jitter that
+// decorrelates the ray directions between neighbours and frames. The
+// temporal blend turns the noise into convergence; a static camera sees the
+// estimator average down, a moving camera sees film-grain-level residual.
+// animated_jitter = 0 freezes the frame phase (flags.y) - the noise stays
+// constant across frames, which makes a capture reproducible frame for
+// frame (the A/B harness pins it off).
+float interceptNoise(vec2 pixel, float frame)
+{
+    return fract(52.9829189 * fract(0.06711056 * pixel.x + 0.00583715 * pixel.y + 0.0857 * frame));
+}
+
+// Right-handed ONB around an arbitrary unit normal (Duff's method): branch-
+// free, no cross products, stable for every normal including +/-Y.
+void onb(vec3 n, out vec3 tangent, out vec3 bitangent)
+{
+    const float s = n.z >= 0.0 ? 1.0 : -1.0;
+    const float a = -1.0 / (s + n.z);
+    const float b = n.x * n.y * a;
+    tangent   = vec3(1.0 + s * n.x * n.x * a, s * b, -s * n.x);
+    bitangent = vec3(b, s + n.y * n.y * a, -n.y);
+}
+
+// Reprojection of a world point into the PREVIOUS frame's screen uv, or
+// vec2(-1.0) when the point falls outside the previous frustum.
+vec2 previousUv(vec3 worldPoint)
+{
+    const vec4 clip = previousCamera.viewProjection * vec4(worldPoint, 1.0);
+    if (clip.w <= 0.0)
+    {
+        return vec2(-1.0);
+    }
+    const vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+    {
+        return vec2(-1.0);
+    }
+    return uv;
+}
+
+// Reprojection confidence: the previous frame stored the view depth of the
+// surface it shaded there; the reprojected point predicts a depth. Flat
+// continuation passes (relative error small), silhouettes and disocclusions
+// fail (the stored depth jumps). The band scales with the depth so distant
+// geometry is not held to a centimetre tolerance.
+//
+// temporal_normal_rejection (flags.z, Lumen's depth+normal history
+// rejection): the depth test alone passes a flat wall that has SLID across
+// the pixel under motion; the second term rejects history where the
+// G-buffer normal at the reprojected uv disagrees with the shaded normal
+// (an 8th-power cosine - a tight cone, same shape the spatial filter uses).
+float historyConfidence(vec2 uv, float predictedDepth, vec3 shadedNormal, float normalRejection)
+{
+    const vec4 history = texture(historySampler, uv);
+    if (history.a <= 0.0 || history.a >= 30000.0)
+    {
+        return 0.0; // sky pixel last frame (the 60000 sentinel): no surface history
+    }
+    const float band = max(0.35, 0.12 * predictedDepth);
+    float confidence = exp(-abs(history.a - predictedDepth) / band);
+    if (normalRejection > 0.5)
+    {
+        const vec3 historyNormal = normalize(texture(normalSampler, uv).xyz);
+        confidence *= pow(max(dot(shadedNormal, historyNormal), 0.0), 8.0);
+    }
+    return confidence;
+}
+
+// ---- the screen-space stage (rev 32, the Lumen ordering's first half) ----
+// The ray is marched through THIS frame's depth buffer before the analytic
+// SDF is consulted. Everything here is the rasterized truth - mesh instances
+// and analytic primitives alike - at per-pixel fidelity: silhouettes are
+// exact even where the world trace would graze an occluder proxy, the hit's
+// material is the one the G-buffer actually shaded, and the march carries no
+// jitter, so near-field bounces add no estimator noise. Distances are
+// compared Euclidean-from-the-camera (no view-space dependency): a sample has
+// crossed a buffered surface when its camera distance exceeds the buffer
+// pixel's by more than the thickness tolerance.
+//
+// Rev 33: stride count, bisect depth, thickness tolerance and march bound
+// all arrive through the push block (screen_steps / screen_refine /
+// screen_thickness / screen_max_distance), and the whole stage is skippable
+// (screen_trace = 0: the world-only A/B, Lumen's Screen Traces off).
+
+bool screenMarch(vec3 origin, vec3 direction, uint primitiveCount,
+                 float maxDistance, uint strideSteps, uint refineSteps,
+                 float thickness, out vec3 hitPoint, out vec2 hitUv, out vec3 hitNormal)
+{
+    hitPoint = vec3(0.0);
+    hitUv = vec2(0.0);
+    hitNormal = vec3(0.0, 1.0, 0.0);
+    const float tMax = min(maxDistance, giPush.params2.z);
+    const float stepMin = 0.05; // the first stride: 5 cm contact-band precision
+    float tPrev = 0.0;
+    bool prevInFront = true; // the origin rides its own surface by 2 cm
+    for (uint step = 0u; step < strideSteps; ++step)
+    {
+        // Exponential stride: 5 cm at the first step, the spacing growing
+        // until the march reaches tMax - near-field detail is what the
+        // screen stage exists for.
+        const float t = stepMin * pow(tMax / stepMin, float(step + 1) / float(strideSteps));
+        const vec3 samplePoint = origin + direction * t;
+        const vec4 clip = viewProjection * vec4(samplePoint, 1.0);
+        if (clip.w <= 0.0)
+        {
+            return false; // behind the camera: the screen cannot answer
+        }
+        const vec2 sampleUv = clip.xy / clip.w * 0.5 + 0.5;
+        if (any(lessThan(sampleUv, vec2(0.0))) || any(greaterThan(sampleUv, vec2(1.0))))
+        {
+            return false; // off the screen: the world stage takes over
+        }
+        const float bufferDepth = texture(depthSampler, sampleUv).r;
+        const vec3 bufferPoint = worldPositionFromDepth(inverseViewProjection,
+                                                        sampleUv * 2.0 - vec2(1.0), bufferDepth);
+        const float bufferDistance = length(bufferPoint - cameraPosition.xyz);
+        const float sampleDistance = length(samplePoint - cameraPosition.xyz);
+        const bool inFront = sampleDistance < bufferDistance;
+        if (prevInFront && !inFront)
+        {
+            const float behind = sampleDistance - bufferDistance;
+            if (behind > thickness + 0.05 * sampleDistance)
+            {
+                return false; // flew past a surface the stride undersampled
+            }
+            // Bisect between the last in-front sample and this one: the
+            // crossing lands on the buffered surface, not stride-depth past it.
+            float lo = tPrev;
+            float hi = t;
+            for (uint refine = 0u; refine < refineSteps; ++refine)
+            {
+                const float mid = 0.5 * (lo + hi);
+                const vec3 midPoint = origin + direction * mid;
+                const vec4 midClip = viewProjection * vec4(midPoint, 1.0);
+                if (midClip.w <= 0.0)
+                {
+                    break;
+                }
+                const vec2 midUv = midClip.xy / midClip.w * 0.5 + 0.5;
+                const float midDepth = texture(depthSampler, midUv).r;
+                const vec3 midBuffer = worldPositionFromDepth(inverseViewProjection,
+                                                              midUv * 2.0 - vec2(1.0), midDepth);
+                if (length(midPoint - cameraPosition.xyz) < length(midBuffer - cameraPosition.xyz))
+                {
+                    lo = mid;
+                }
+                else
+                {
+                    hi = mid;
+                }
+            }
+            hitPoint = origin + direction * hi;
+            const vec4 hitClip = viewProjection * vec4(hitPoint, 1.0);
+            hitUv = hitClip.xy / hitClip.w * 0.5 + 0.5;
+            hitNormal = normalize(texture(normalSampler, hitUv).xyz);
+            return true;
+        }
+        tPrev = t;
+        prevInFront = inFront;
+    }
+    return false; // the march exhausted its budget: the world stage answers
+}
+
+// ---- short-range occlusion (rev 33, the Lumen ShortRangeAO analogue) -----
+// A ring of depth taps around the pixel, applied AFTER the temporal filter
+// (Lumen applies its shortest-range occlusion there so it carries no lag).
+// Each tap that shows geometry at least the 5 cm contact band nearer than
+// this surface occludes proportionally to the relative depth difference.
+// The darkening is capped at 75% - a contact shadow, never a black halo.
+float shortRangeOcclusion(vec2 uv, float viewDepth, uint radiusPx, float strength)
+{
+    const ivec2 resolution = imageSize(giImage);
+    const vec2 texel = 1.0 / vec2(resolution);
+    const vec2 ring[8] = vec2[8](
+        vec2(-1.0, -1.0), vec2(0.0, -1.0), vec2(1.0, -1.0),
+        vec2(-1.0,  0.0),                  vec2(1.0,  0.0),
+        vec2(-1.0,  1.0), vec2(0.0,  1.0), vec2(1.0,  1.0));
+    float occlusion = 0.0;
+    uint samples = 0u;
+    for (uint tap = 0u; tap < 8u; ++tap)
+    {
+        const vec2 tapUv = uv + ring[tap] * float(radiusPx) * texel;
+        if (any(lessThan(tapUv, vec2(0.0))) || any(greaterThan(tapUv, vec2(1.0))))
+        {
+            continue;
+        }
+        const float tapDepth = texture(depthSampler, tapUv).r;
+        if (tapDepth >= 1.0)
+        {
+            continue; // sky beside the surface cannot occlude it
+        }
+        const vec3 tapPoint = worldPositionFromDepth(inverseViewProjection, tapUv * 2.0 - vec2(1.0), tapDepth);
+        const float tapDistance = length(tapPoint - cameraPosition.xyz);
+        // Nearer geometry inside the ring, past the contact band: occlude.
+        const float nearer = viewDepth - tapDistance;
+        occlusion += max(nearer - 0.05, 0.0) / max(viewDepth, 0.5);
+        ++samples;
+    }
+    if (samples == 0u)
+    {
+        return 1.0;
+    }
+    occlusion = occlusion / float(samples) * strength;
+    return 1.0 - clamp(occlusion, 0.0, 0.75);
+}
+
+void main()
+{
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    const ivec2 resolution = imageSize(giImage);
+    if (pixel.x >= resolution.x || pixel.y >= resolution.y)
+    {
+        return;
+    }
+    const vec2 uv = (vec2(pixel) + 0.5) / vec2(resolution);
+    const float depth = texture(depthSampler, uv).r;
+    if (depth >= 1.0)
+    {
+        // Sky pixels carry no GI term (the composite's sky branch ignores this
+        // target); the alpha stays a valid "sky" sentinel for the confidence
+        // checks above. 60000 is the largest value RGBA16F stores exactly
+        // (half-float max 65504): real view depths never approach it inside
+        // the 20 km far plane, so the sentinel is unambiguous.
+        imageStore(giImage, pixel, vec4(0.0, 0.0, 0.0, 60000.0));
+        return;
+    }
+    const uint primitiveCount = giPush.counts.x;
+    const float frameIndex = float(giPush.counts.y);
+    // The noise phase the interceptNoise draws read: the real frame counter
+    // while animated_jitter is on, frozen at 0 when it is off (a
+    // deterministic capture). Freezing the PHASE must not freeze the
+    // temporal frame counter below - the history blend and the second-bounce
+    // guard still need the real frame index.
+    float noisePhase = frameIndex;
+    const uint rayCount = uint(clamp(giPush.params.z, 1.0, 8.0) + 0.5);
+    const uint strideSteps = uint(clamp(giPush.params2.x, 1.0, 64.0) + 0.5);
+    const uint refineSteps = uint(clamp(giPush.params2.w, 1.0, 8.0) + 0.5);
+    const float screenThickness = max(giPush.params2.y, 0.01);
+    const bool screenTracesOn = giPush.flags.x != 0u;
+    const bool jitterAnimated = giPush.flags.y != 0u;
+    const float normalRejection = giPush.flags.z != 0u ? 1.0 : 0.0;
+    const uint aoRadius = min(giPush.flags.w, 16u);
+    const float aoStrength = max(giPush.params3.y, 0.0);
+    const float temporalCap = max(giPush.params3.x, 1.0);
+    const float outputIntensity = max(giPush.params3.z, 0.0);
+    const float skyScale = max(giPush.params3.w, 0.0);
+    if (!jitterAnimated)
+    {
+        noisePhase = 0.0; // frozen noise phase: a deterministic capture
+    }
+    const vec3 worldPosition = worldPositionFromDepth(inverseViewProjection, uv * 2.0 - vec2(1.0), depth);
+    const vec3 normal = normalize(texture(normalSampler, uv).xyz);
+    const float viewDepth = length(worldPosition - cameraPosition.xyz);
+
+    // ---- the final gather: stratified cosine-distributed rays ------------
+    vec3 tangent;
+    vec3 bitangent;
+    onb(normal, tangent, bitangent);
+
+    vec3 gatherSum = vec3(0.0);
+    for (uint ray = 0u; ray < rayCount; ++ray)
+    {
+        // Stratified jitter: the ray index rotates the noise domain by the
+        // golden-angle conjugate so the per-pixel samples cover the cosine
+        // hemisphere instead of clustering (rev 30's single sample printed
+        // the lattice the denoise spent its budget fighting). The +17.31
+        // frame shift decorrelates the two dimensions.
+        const float rayShift = float(ray) * 2.39996322973;
+        const float r1 = interceptNoise(vec2(pixel) + vec2(rayShift, -rayShift), noisePhase);
+        const float r2 = interceptNoise(vec2(pixel) + vec2(53.7, 91.3) + vec2(-rayShift, rayShift), noisePhase + 17.31);
+        const float angle = 6.28318530718 * r2;
+        const float radius = sqrt(max(r1, 0.0));
+        const vec3 direction = normalize(tangent * (radius * cos(angle)) + bitangent * (radius * sin(angle))
+                                         + normal * sqrt(max(1.0 - r1, 0.0)));
+
+        vec3 gi;
+        // The ray origin rides 2 cm above the surface; the world stage
+        // additionally exits whatever contains it BEFORE marching - the
+        // occluder proxies wrap every mesh instance in its bounding box,
+        // and a smooth body (the organic characters, the rounded canopies)
+        // sits strictly INSIDE its proxy. Without this escape every
+        // character pixel's gather ray reported an immediate hit against its
+        // own shell (the SDF is negative inside it) and the whole crowd
+        // gathered ZERO indirect light - the shaded sides read as
+        // silhouettes no matter what the ambient did. The same march-out
+        // softShadow uses (three overlaps max, 2 cm clearance past the last
+        // face): the proxy still shades the ground around its owner, other
+        // occluders still shade the owner, and the owner's shell stops
+        // killing its own rays.
+        const vec3 rayOrigin = worldPosition + normal * 0.02;
+        vec3 incoming = vec3(0.0);
+        vec3 hitAlbedo = vec3(0.0);
+        vec3 hitPoint = vec3(0.0);
+        vec3 hitNormal = normal;
+        bool hitSurface = false;
+        // ---- stage 1: the screen march (the rasterized truth) ------------
+        // screen_trace = 0 skips the stage entirely: every ray goes to the
+        // world stage (the world-only A/B, Lumen's Screen Traces off).
+        if (screenTracesOn)
+        {
+            vec3 screenHitPoint;
+            vec2 screenHitUv;
+            vec3 screenHitNormal;
+            if (screenMarch(rayOrigin, direction, primitiveCount, giPush.params.x,
+                            strideSteps, refineSteps, screenThickness,
+                            screenHitPoint, screenHitUv, screenHitNormal))
+            {
+                hitSurface = true;
+                hitPoint = screenHitPoint;
+                hitNormal = screenHitNormal;
+                // The screen hit's material: if the point lies on an analytic
+                // primitive (the chamber, the terrain) the owned relight gives
+                // the full textured + emissive answer - the emissive panels keep
+                // their light through this path. A mesh surface (characters,
+                // props, cottages) has no analytic record: the G-buffer carries
+                // the rasterized material instead (meshes are non-emissive in
+                // the current content set). Either way the indirect clamp holds
+                // a rare bright hit from printing a firefly the spatial filter
+                // cannot average away.
+                if (abs(sceneSDF(hitPoint, primitiveCount)) < 0.05)
+                {
+                    uint screenOwner;
+                    sceneSDFOwned(hitPoint, primitiveCount, screenOwner);
+                    incoming = min(surfaceOutgoingRadianceOwned(hitPoint, screenHitNormal, screenOwner, primitiveCount, hitAlbedo),
+                                   vec3(max(giPush.params.w, 0.0)));
+                }
+                else
+                {
+                    hitAlbedo = texture(albedoSampler, screenHitUv).rgb;
+                    incoming = min(hitAlbedo * directIrradianceOverPi(hitPoint, screenHitNormal, primitiveCount),
+                                   vec3(max(giPush.params.w, 0.0)));
+                }
+            }
+        }
+        if (!hitSurface)
+        {
+            // ---- stage 2: the world-space fallback (the exact SDF) --------
+            vec3 origin = rayOrigin;
+            for (uint exit = 0u; exit < 3u; ++exit)
+            {
+                const float insideDepth = sceneSDF(origin, primitiveCount);
+                if (insideDepth >= 0.0)
+                {
+                    break;
+                }
+                origin += direction * (-insideDepth + 0.02);
+            }
+            uint owner;
+            const float hit = traceIntervalOwned(origin, direction, 0.02, giPush.params.x, primitiveCount,
+                                                 giPush.counts.z, owner);
+            if (hit >= 0.0)
+            {
+                hitSurface = true;
+                hitPoint = origin + direction * hit;
+                hitNormal = sdfNormal(hitPoint, primitiveCount);
+                // The hit's own direct radiance (textured, shadowed sun + points +
+                // emissive) - the "surface cache" read.
+                incoming = min(surfaceOutgoingRadianceOwned(hitPoint, hitNormal, owner, primitiveCount, hitAlbedo),
+                               vec3(max(giPush.params.w, 0.0)));
+            }
+        }
+        if (hitSurface)
+        {
+            // The second bounce: the previous frame's gathered irradiance AT the
+            // hit point, albedo-weighted (outgoing = albedo * irradiance/pi) and
+            // confidence-gated by the stored depth. This is the radiance-cache
+            // stand-in: one fetch, one bounce of memory, converges with the same
+            // temporal filter the pixel itself uses. Frame 0 has no history to
+            // read (the image's first layout transition leaves its contents
+            // undefined) - the rev-30 first frame blended 12.5% of that garbage.
+            // Shared by BOTH hit classes: a screen hit point is a world point
+            // like any other.
+            if (giPush.counts.w != 0u && frameIndex > 0.5)
+            {
+                const vec2 prevHitUv = previousUv(hitPoint);
+                if (prevHitUv.x >= 0.0)
+                {
+                    const float predicted = length(hitPoint - previousCamera.cameraPosition.xyz);
+                    incoming += hitAlbedo * texture(historySampler, prevHitUv).rgb
+                                * historyConfidence(prevHitUv, predicted, hitNormal, normalRejection);
+                }
+            }
+            gi = incoming;
+        }
+        else
+        {
+            // A miss really is sky: the SDF covers the scene everywhere, so the
+            // ray left all geometry. skyBase is the documented GI-grade sky model
+            // (gradient + dusk + broad halo + clouds, no disks - the sun and moon
+            // DISKS belong to the direct pass's shadowed keys; their energy would
+            // otherwise be counted twice through the same aperture).
+            // sky_miss_scale shapes the miss energy (an art-direction dial: 0
+            // removes sky bounce, >1 floods the indirect term with skylight).
+            gi = skyBase(direction) * skyScale;
+            // The moon's soft halo rides the night sky (its disk's direct light is
+            // the A-186 key's business).
+            if (environment.moonDirectionIntensity.w > 0.0)
+            {
+                const vec3 moonDirection = normalize(environment.moonDirectionIntensity.xyz);
+                const float cosine = clamp(dot(direction, moonDirection), 0.0, 1.0);
+                gi += vec3(0.55, 0.62, 0.80) * environment.moonDirectionIntensity.w * 0.02 * pow(cosine, 24.0) * skyScale;
+            }
+        }
+        gatherSum += gi;
+    }
+
+    vec3 gi = gatherSum / float(rayCount);
+
+    // ---- temporal accumulation -------------------------------------------
+    // The alpha floor keeps interactive motion responsive; the running-average
+    // ramp (alpha -> 1 - 1/(N+1) while N is small) lets static cameras converge
+    // quadratically: the capture rig's tens of frames drive the residual noise
+    // to a few percent. Rev 33: the ramp is CAPPED at temporal_max_frames
+    // (Lumen's MaxFramesAccumulated, default 10 there, 64 here) - an uncapped
+    // ramp hardens the history into a frozen average that stops tracking the
+    // scene. Reprojection + depth/normal confidence gate the history: when the
+    // camera moves, pixels whose surface identity changed fall back to the
+    // fresh estimate. Frame 0 skips the blend entirely (no defined history).
+    const float rampAlpha = min(1.0 - 1.0 / (frameIndex + 1.0), temporalCap / (temporalCap + 1.0));
+    const float alpha = max(giPush.params.y, rampAlpha);
+    const vec2 prevUv = previousUv(worldPosition);
+    if (prevUv.x >= 0.0 && frameIndex > 0.5)
+    {
+        const float predicted = length(worldPosition - previousCamera.cameraPosition.xyz);
+        const float confidence = historyConfidence(prevUv, predicted, normal, normalRejection);
+        gi = mix(gi, texture(historySampler, prevUv).rgb, confidence * alpha);
+    }
+
+    // ---- short-range occlusion (post-temporal, Lumen's ordering) ---------
+    if (aoRadius > 0u)
+    {
+        gi *= shortRangeOcclusion(uv, viewDepth, aoRadius, aoStrength);
+    }
+
+    // ---- output shaping ----------------------------------------------------
+    // intensity scales the STORED term at the last moment - the history keeps
+    // the unscaled transport (the second-bounce read stays consistent: every
+    // frame's output is intensity * (gather + bounce), never intensity^2).
+    gi *= outputIntensity;
+
+    // Alpha = view depth: the confidence metric both temporal consumers share.
+    imageStore(giImage, pixel, vec4(gi, viewDepth));
+}

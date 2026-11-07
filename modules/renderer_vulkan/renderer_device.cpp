@@ -533,7 +533,14 @@ void RendererState::createFrameResources()
     const vk::Extent2D extent   = swapchainExtent;
     constexpr auto colorUsage   = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled
                                 | vk::ImageUsageFlagBits::eStorage;
-    constexpr auto sampledUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage;
+    // Rev 30: the radiance targets gain the transfer bits - a temporal
+    // technique (the GI pass) mirrors its output into a history image every
+    // frame, which is a vkCmdCopyImage (src on the target, dst on the
+    // technique's own image). The extra usage bits cost nothing; a target
+    // without them made the copy illegal (lavapipe segfaulted on the first
+    // GI frame).
+    constexpr auto sampledUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage
+                                | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst;
     constexpr auto aspectColor  = vk::ImageAspectFlagBits::eColor;
 
     createFrameImage(albedoImage, extent, gbufferAlbedoFormat, colorUsage, aspectColor, vk::ImageLayout::eGeneral);
@@ -563,6 +570,23 @@ void RendererState::createFrameResources()
         gbufferDepthFormat,
         vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled,
         vk::ImageAspectFlagBits::eDepth,
+        vk::ImageLayout::eGeneral
+    );
+
+    // Rev 31 (the layered depth buffer): the transparency layer's three
+    // attachments. transDepth stores gl_FragCoord.z as a COLOR attachment
+    // (R32F) rather than a second depth image: the transparency pass then
+    // depth-tests against the opaque depth through the regular depth
+    // attachment (write disabled) and needs no shader-side depth discard.
+    constexpr auto transUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled;
+    createFrameImage(transAlbedoImage, extent, gbufferAlbedoFormat, transUsage, aspectColor, vk::ImageLayout::eGeneral);
+    createFrameImage(transNormalImage, extent, hdrColorFormat, transUsage, aspectColor, vk::ImageLayout::eGeneral);
+    createFrameImage(
+        transDepthImage,
+        extent,
+        vk::Format::eR32Sfloat,
+        transUsage,
+        aspectColor,
         vk::ImageLayout::eGeneral
     );
 
@@ -605,6 +629,9 @@ void RendererState::releaseFrameResources()
     indirectRadianceImage = FrameImage{};
     indirectSpecularImage = FrameImage{};
     depthImage            = FrameImage{};
+    transAlbedoImage      = FrameImage{};
+    transNormalImage      = FrameImage{};
+    transDepthImage       = FrameImage{};
     dummyImage            = FrameImage{};
     // The bloom chain is extent scoped like every frame image.
     hdrSceneImage = FrameImage{};

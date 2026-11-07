@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <memory>
 
 namespace engine
@@ -119,16 +120,18 @@ private:
 constexpr std::string_view moduleContext = "pbr module";
 
 // Push-constant block mirrored by pbr_lighting.comp (shadow/flag scalars,
-// dispatch counts, reflection-fold hand-off). File scope so the pipeline
-// layout can size its range with sizeof instead of a raw byte count.
+// dispatch counts, reflection-fold hand-off, heightfield shadow params).
+// File scope so the pipeline layout can size its range with sizeof instead of
+// a raw byte count.
 struct PbrPassPush
 {
     std::array<float, 4> shadowAndFlags;
     std::array<std::uint32_t, 4> counts;
     std::array<float, 4> reflectionFoldPush;
+    std::array<float, 4> heightfieldParams; // worldSize, heightMin, heightMax, enabled
 };
 
-static_assert(sizeof(PbrPassPush) == 48, "pbr_lighting.comp expects a 48-byte push block");
+static_assert(sizeof(PbrPassPush) == 64, "pbr_lighting.comp expects a 64-byte push block");
 
 // The pass object handed to the renderer. Owns its Vulkan objects; creates
 // them lazily on the first record (the renderer guarantees a live device by
@@ -201,8 +204,23 @@ public:
         const PbrPassPush pushValue{
             .shadowAndFlags     = {lights->shadowsEnabled ? 1.0f : 0.0f, lights->penumbra, 0.0f, 0.0f},
             .counts             = {context.primitiveCount, 0u, 0u, 0u},
-            .reflectionFoldPush = {reflectionFold.enabled ? 1.0f : 0.0f, reflectionFold.maxRoughness, 0.0f, 0.0f}
+            .reflectionFoldPush = {reflectionFold.enabled ? 1.0f : 0.0f, reflectionFold.maxRoughness, 0.0f, 0.0f},
+            .heightfieldParams  = context.heightfieldParams
         };
+        // The heightfield grid fills lazily (the terrain mesh uploads on the
+        // first scene refresh, which can land after this pass's rebuild
+        // bound the dummy 1x1 view): rebind binding 3 exactly once when the
+        // grid arrives. Everything else in the shared set is static for the
+        // pipeline's lifetime.
+        if (context.heightfieldParams[3] > 0.5f && !heightfieldBound)
+        {
+            vk::DescriptorImageInfo heightInfo(**linearSampler, context.heightfieldView, vk::ImageLayout::eShaderReadOnlyOptimal);
+            vk::WriteDescriptorSet write;
+            write.setDstSet(**sharedSet).setDstBinding(3).setDescriptorType(vk::DescriptorType::eCombinedImageSampler);
+            write.setImageInfo(heightInfo);
+            context.device.updateDescriptorSets(write, {});
+            heightfieldBound = true;
+        }
         commandBuffer.pushConstants(
             **pipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pushValue), &pushValue
         );
@@ -233,6 +251,8 @@ private:
         sharedSetLayout.reset();
         lightStorage.reset();
         sampler.reset();
+        linearSampler.reset();
+        heightfieldBound = false;
 
         // Light uniform buffer: host visible, persistently mapped, updated
         // every frame (computation rule: one memcpy, no staging round trip).
@@ -241,16 +261,35 @@ private:
         );
 
         sampler = makeNearestClampSampler(context.device);
-
-        // Set 0 layout: camera UBO, primitives SSBO, lights UBO.
+        // The heightfield shadow grid needs BILINEAR filtering - the 256²
+        // grid over 16 km is 62.5 m per texel, and nearest sampling prints
+        // the grid into the shadow terminators as hard staircases.
         {
-            std::array<vk::DescriptorSetLayoutBinding, 3> bindings;
+            vk::SamplerCreateInfo samplerInfo;
+            samplerInfo.setMagFilter(vk::Filter::eLinear);
+            samplerInfo.setMinFilter(vk::Filter::eLinear);
+            samplerInfo.setMipmapMode(vk::SamplerMipmapMode::eNearest);
+            samplerInfo.setAddressModeU(vk::SamplerAddressMode::eClampToEdge);
+            samplerInfo.setAddressModeV(vk::SamplerAddressMode::eClampToEdge);
+            samplerInfo.setAddressModeW(vk::SamplerAddressMode::eClampToEdge);
+            samplerInfo.setMipLodBias(0.0f);
+            samplerInfo.setMinLod(0.0f);
+            samplerInfo.setMaxLod(std::numeric_limits<float>::max());
+            linearSampler = std::make_unique<vk::raii::Sampler>(context.device, samplerInfo);
+        }
+
+        // Set 0 layout: camera UBO, primitives SSBO, lights UBO, heightfield
+        // shadow grid (rev 25).
+        {
+            std::array<vk::DescriptorSetLayoutBinding, 4> bindings;
             bindings[0].setBinding(0).setDescriptorType(vk::DescriptorType::eUniformBuffer).setDescriptorCount(1);
             bindings[0].setStageFlags(vk::ShaderStageFlagBits::eCompute);
             bindings[1].setBinding(1).setDescriptorType(vk::DescriptorType::eStorageBuffer).setDescriptorCount(1);
             bindings[1].setStageFlags(vk::ShaderStageFlagBits::eCompute);
             bindings[2].setBinding(2).setDescriptorType(vk::DescriptorType::eUniformBuffer).setDescriptorCount(1);
             bindings[2].setStageFlags(vk::ShaderStageFlagBits::eCompute);
+            bindings[3].setBinding(3).setDescriptorType(vk::DescriptorType::eCombinedImageSampler).setDescriptorCount(1);
+            bindings[3].setStageFlags(vk::ShaderStageFlagBits::eCompute);
             vk::DescriptorSetLayoutCreateInfo setInfo;
             setInfo.setBindings(bindings);
             sharedSetLayout = std::make_unique<vk::raii::DescriptorSetLayout>(context.device, setInfo);
@@ -300,9 +339,10 @@ private:
 
         // Shared set 0.
         {
-            std::array<vk::DescriptorPoolSize, 2> poolSizes{
+            std::array<vk::DescriptorPoolSize, 3> poolSizes{
                 vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 2),
-                vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 1)
+                vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 1),
+                vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, 1)
             };
             vk::DescriptorPoolCreateInfo poolInfo;
             poolInfo.setFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet);
@@ -319,15 +359,22 @@ private:
             vk::DescriptorBufferInfo cameraInfo(context.cameraBuffer, 0, sizeof(CameraData));
             vk::DescriptorBufferInfo primitivesInfo(context.primitivesBuffer, 0, vk::WholeSize);
             vk::DescriptorBufferInfo lightInfo(**lightStorage.buffer, 0, sizeof(GpuLightUniform));
-            std::array<vk::WriteDescriptorSet, 3> writes;
+            // The heightfield binds as the DUMMY view at rebuild time (the
+            // grid may not exist yet); record() rebinds the real view once
+            // when it arrives (heightfieldBound below).
+            vk::DescriptorImageInfo heightInfo(**linearSampler, context.heightfieldView, vk::ImageLayout::eShaderReadOnlyOptimal);
+            std::array<vk::WriteDescriptorSet, 4> writes;
             writes[0].setDstSet(**sharedSet).setDstBinding(0).setDescriptorType(vk::DescriptorType::eUniformBuffer);
             writes[0].setBufferInfo(cameraInfo);
             writes[1].setDstSet(**sharedSet).setDstBinding(1).setDescriptorType(vk::DescriptorType::eStorageBuffer);
             writes[1].setBufferInfo(primitivesInfo);
             writes[2].setDstSet(**sharedSet).setDstBinding(2).setDescriptorType(vk::DescriptorType::eUniformBuffer);
             writes[2].setBufferInfo(lightInfo);
+            writes[3].setDstSet(**sharedSet).setDstBinding(3).setDescriptorType(vk::DescriptorType::eCombinedImageSampler);
+            writes[3].setImageInfo(heightInfo);
             context.device.updateDescriptorSets(writes, {});
         }
+        heightfieldBound = context.heightfieldParams[3] > 0.5f;
 
         // Frame set 1.
         {
@@ -382,6 +429,8 @@ private:
     bool uploadedUniformValid = false;
     MappedHostVisibleBuffer lightStorage;
     std::unique_ptr<vk::raii::Sampler> sampler;
+    std::unique_ptr<vk::raii::Sampler> linearSampler; // heightfield shadow grid (rev 25)
+    bool heightfieldBound = false;
     // Layouts are declared BEFORE the pools/sets/pipelines that embed them on
     // purpose: with this order even the automatic member destruction (which
     // runs top to bottom) tears pipelines down before their layouts and
